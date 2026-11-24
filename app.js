@@ -302,6 +302,83 @@ function gramsFor(f,num,unit,text,side){
     case"flasche":g=num*(liquid?500:f.u);break;case"schus":return 30;case"prise":return 1;case"kugel":g=num*60;break;default:g=num*f.u}
   return Math.round(g*mult);
 }
+
+/* ---------- Krafttraining frei gesprochen ---------- */
+const esc=x=>x.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+const EX_RE=new RegExp("(^|[^a-zäöüß])("+EX_ALIAS.map(a=>esc(a[0])).join("|")+")(?:e|n|en|s)?(?=[^a-zäöüß]|$)","g");
+const EX_MAP=Object.fromEntries(EX_ALIAS);
+const EQ=[[/\b(?:e\s?-?\s?z|s\s?-?\s?z)(?:\s?-?\s?(?:stange|hantel|curl\w*))?\b|\bezstange\b|\bszstange\b/,"SZ-Stange"],[/\b(?:kurzhantel\w*|kh|dumbbells?)\b/,"Kurzhantel"],[/\b(?:langhantel\w*|lh|barbell)\b/,"Langhantel"],[/\b(?:kabel\w*|cable|seilzug|seil)\b/,"Kabel"],[/\b(?:maschine|gerät|machine)\b/,"Maschine"],[/\b(?:multipresse|smith)\b/,"Multipresse"],[/\b(?:kettlebell|kugelhantel)\b/,"Kettlebell"],[/\b(?:widerstandsband|theraband|band)\b/,"Band"]];
+const GYMW=/(\d\s*(?:x|×|\*|mal)\s*\d|\b(?:sätze|satz|wdh|wiederholung\w*|reps?|kg|kilo|supersatz|superset|pro seite|pro hand|je seite|körpergewicht|eigengewicht|versagen|rir|rpe|aufwärmsatz|aufwärmsätze|warm ?up)\b)/;
+const SEP=/[.;!?\n]+|,(?!\s*\d)|\b(?:und dann|dann noch|danach|anschließend|als nächstes|zum schluss|zum abschluss|außerdem)\b/;
+function parseSets(r){
+  const e={};let m;const notes=[];
+  const nums=[...r.matchAll(/\d+(?:\.\d+)?/g)].length;
+  // Gewichte
+  const r2=r.replace(/(\d+)\s*(?:x|×|\*|mal)\s*(\d+)/g," # ").replace(/\d+\s*(?:sätze|satz|runden)\b/g," # ");const LS="(?:\\s*(?:,|\\/|und|dann)\\s*|\\s+)";
+  const kgs=[];let km;const kgList=r2.match(new RegExp("((?:\\d+(?:\\.\\d+)?"+LS+")+\\d+(?:\\.\\d+)?)\\s*(?:kg|kilo)"));
+  if(kgList)kgList[1].split(new RegExp(LS)).filter(Boolean).forEach(x=>kgs.push(+x));
+  else for(km of r.matchAll(/(\d+(?:\.\d+)?)\s*(?:kg|kilo)/g))kgs.push(+km[1]);
+  // Sätze × Wiederholungen
+  if((m=r.match(/(\d+)\s*(?:x|×|\*|mal)\s*(\d+)(?!\s*(?:\.\d)?\s*(?:kg|kilo))/))){e.sets=+m[1];e.reps=+m[2]}
+  if((m=r.match(/(\d+)\s*(?:sätze|satz|runden|durchgänge|durchgang)\b/)))e.sets=+m[1];
+  if((m=r.match(/(?:sätze|satz|runden)\s*(?:à|a|á|mit|zu|je|von|x|mal|für)?\s*(?:je\s*)?(\d+)(?!\s*(?:\.\d)?\s*(?:kg|kilo|sätze|satz))/))&&e.reps==null)e.reps=+m[1];
+  if((m=r.match(/(\d+)\s*(?:wdh|wiederholung\w*|reps?|mal\b)(?!\s*\d)/))&&e.reps==null&&!/x|×/.test(m[0]))e.reps=+m[1];
+  // Wiederholungsliste: 10, 8, 6 (ohne kg dahinter)
+  const rl=[...r2.matchAll(new RegExp("(\\d+(?:"+LS+"\\d+)+)(?!\\s*(?:\\.\\d)?\\s*(?:kg|kilo|\\d))","g"))].map(x=>x[1]).filter(x=>!kgList||!kgList[1].includes(x));
+  if(rl.length){const list=rl[0].split(new RegExp(LS)).filter(Boolean).map(Number);if(list.every(x=>x>0&&x<=50)){e.repList=list;if(e.sets==null||e.sets===list.length)e.sets=list.length;e.reps=null}}
+  // „mit 60“ ohne Einheit
+  if(!kgs.length&&(m=r.match(/(?:mit|@|bei|à)\s*(\d+(?:\.\d+)?)(?!\s*(?:x|×|mal|sätze|satz|wdh|wiederholung|reps?|\d))/))){const v=+m[1];if(e.reps==null&&!e.repList&&v<=30)e.reps=v;else if(v!==e.reps&&!(e.repList||[]).includes(v))kgs.push(v)}
+  if(kgs.length===1)e.kg=kgs[0];
+  else if(kgs.length>1){e.kgList=kgs;e.kg=Math.max(...kgs);if(e.sets==null)e.sets=kgs.length}
+  if(e.sets==null&&e.reps!=null&&!e.repList)e.sets=1;
+  // nur Zahlen ohne Wort: „Bankdrücken 3 10 60“
+  if(e.sets==null&&e.reps==null&&!e.repList&&nums>=2&&!kgs.length){const n=[...r.matchAll(/\d+(?:\.\d+)?/g)].map(x=>+x[0]);if(n[0]<=10&&n[1]<=50){e.sets=n[0];e.reps=n[1];if(n[2]!=null)e.kg=n[2]}}
+  if(/\b(?:körpergewicht|eigengewicht|ohne gewicht|bodyweight|bw)\b/.test(r)){e.bw=true;if(!/\b(?:plus|zusatz\w*|extra|mit)\b/.test(r))delete e.kg}
+  if(/\b(?:plus|zusatz\w*|extra)\b/.test(r)&&e.kg)notes.push("Zusatzgewicht");
+  if(/\b(?:pro|je)\s*(?:seite|hand|arm|bein)\b/.test(r))notes.push("pro Seite");
+  if(/\b(?:versagen|failure|muskelversagen)\b/.test(r))notes.push("bis Versagen");
+  if((m=r.match(/\brir\s*(\d)/))||(m=r.match(/(\d)\s*(?:im tank|in reserve|reserve)/)))notes.push(m[1]+" in Reserve");
+  if((m=r.match(/\brpe\s*(\d+(?:\.\d)?)/)))notes.push("RPE "+m[1]);
+  if(/\b(?:aufwärm\w*|warm ?up)\b/.test(r))notes.push("inkl. Aufwärmen");
+  if(/\b(?:dropsatz|dropset|drop set)\b/.test(r))notes.push("Dropsatz");
+  if(notes.length)e.note=notes.join(", ");
+  // Kennzahlen für Fortschritt: schwerster Satz
+  if(e.repList){const i=e.kgList&&e.kgList.length===e.repList.length?e.kgList.indexOf(e.kg):e.repList.length-1;e.reps=e.repList[Math.max(0,i)]}
+  return e}
+const hasData=e=>e.sets!=null||e.reps!=null||e.kg!=null||e.repList||e.bw;
+function parseGym(t,fallbackSess){
+  const clauses=t.split(SEP).map(x=>(x||"").trim()).filter(Boolean);
+  const ex=[],rest=[];let last=null,grp=0;
+  for(const c of clauses){
+    const ms=[...c.matchAll(EX_RE)].map(m=>({i:m.index+m[1].length,a:m[2]}));
+    if(!ms.length){
+      const data=c.replace(/\d+(?:\.\d+)?/g," ").replace(GYMW,"").replace(new RegExp(GYMW.source,"g"),"").replace(/\b(?:noch|mit|à|a|je|und|von|zu|bei|ich|habe|hab|dann|wieder|nochmal|weitere?)\b/g,"").replace(/[^a-zäöüß]/g,"");
+      if(last&&GYMW.test(c)&&data.length<3){const add=parseSets(c);if(add.sets&&last.sets){const rl=[...(last.repList||Array(last.sets).fill(last.reps)),...(add.repList||Array(add.sets).fill(add.reps))];last.sets+=add.sets;if(rl.every(x=>x!=null)&&new Set(rl).size>1){last.repList=rl}if(add.kg!=null&&last.kg==null)last.kg=add.kg}else Object.assign(last,Object.fromEntries(Object.entries(add).filter(([k,v])=>last[k]==null)));continue}
+      if(GYMW.test(c)&&/\d/.test(c)&&!/\b(km|kilometer|gelaufen|laufen|joggen|schwimm\w*|rad|min|minuten|gegessen|getrunken|g|gramm|ml)\b/.test(c)){
+        const nm=c.replace(/\d+(?:\.\d+)?/g," ").replace(new RegExp(GYMW.source,"g")," ").replace(FILLER," ").replace(/\b(?:mit|à|je|sätze|satz)\b/g," ").replace(/[^a-zäöüß -]/g," ").replace(/\s+/g," ").trim();
+        if(nm.length>=3){const e={name:nm.split(" ").map(cap).join(" "),...parseSets(c),own:true};ex.push(e);last=e;continue}}
+      rest.push(c);continue}
+    const ss=/\b(?:supersatz|superset|im wechsel|abwechselnd)\b/.test(c);if(ss)grp++;
+    const parts=ms.map((m,k)=>({...m,txt:c.slice(k===0?0:m.i,k+1<ms.length?ms[k+1].i:c.length)}));
+    const inClause=[];
+    for(const pt of parts){let name=EX_MAP[pt.a];if(name==="Curls + Trizeps Supersatz"){continue}
+      const eq=EQ.find(([re])=>re.test(pt.txt));if(eq&&!name.includes(eq[1].split("-")[0])&&!/KH|Maschine/.test(name))name+=" ("+eq[1]+")";
+      const e={name,...parseSets(pt.txt)};if(ss)e.ss=String.fromCharCode(64+grp);
+      inClause.push(e)}
+    if(ss){const src=inClause.find(hasData);if(src)for(const e of inClause)if(!hasData(e))for(const k of["sets","reps","repList","kg","kgList","bw"])if(src[k]!=null)e[k]=src[k]}
+    const sessionTalk=/\b(?:trainiert|training|tag|session|einheit|gemacht)\b/.test(c);
+    let skipped=false;for(const e of inClause){if(!hasData(e)&&sessionTalk&&!ss){skipped=true;continue}ex.push(e);last=e}
+    if(!inClause.length||skipped)rest.push(c)}
+  const cnt={};for(const e of ex){const s=sessionFor(e.name.replace(/ \(.*\)$/,""));if(s)cnt[s]=(cnt[s]||0)+1}
+  const session=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0]||fallbackSess||"push";
+  return{ex,session,rest:rest.join(". ")}}
+function setsTxt(e){return e.sets!=null?String(e.sets):"–"}
+function repsTxt(e){return e.repList?e.repList.join("/"):e.reps!=null?String(e.reps):"–"}
+function kgTxt(e){return e.kgList?e.kgList.map(x=>kgf(x)).join("/")+" kg":e.kg!=null?kgf(e.kg)+" kg":e.bw?"Körpergewicht":"–"}
+function exTable(list){
+  return h("table",{class:"ex-t"},h("thead",{},h("tr",{},h("th",{},"Übung"),h("th",{},"Sätze"),h("th",{},"Wdh."),h("th",{},"Gewicht"))),
+    h("tbody",{},list.map(e=>h("tr",{},h("td",{},e.ss?h("span",{class:"ss"},e.ss):null,e.name,e.note?h("div",{class:"tiny muted"},e.note):null),h("td",{class:"num"},setsTxt(e)),h("td",{class:"num"},repsTxt(e)),h("td",{class:"num"},kgTxt(e))))))}
+
 function parseExercise(seg){for(const[a,name]of EX_ALIAS){if(seg.includes(a)){const ex={name};let m=seg.match(/(\d+)\s*(?:x|×|mal|\*)\s*(\d+)/);
   if(m){ex.sets=+m[1];ex.reps=+m[2]}else{const s=seg.match(/(\d+)\s*sätze?/),r=seg.match(/(\d+)\s*(?:wdh|wiederholungen|reps)/);if(s)ex.sets=+s[1];if(r)ex.reps=+r[1]}
   const k=seg.match(/(\d+(?:\.\d+)?)\s*(?:kg|kilo)/)||seg.match(/(?:mit|@|à|bei)\s*(\d+(?:\.\d+)?)(?!\s*(?:x|×|mal|sätze|wdh))/);if(k)ex.kg=+k[1];return ex}}return null}
@@ -325,15 +402,15 @@ function parseText(raw,ds){
   out.supps=suppIn(t);
   if(/\b(alle|meine)\s+(supplements|supps|nahrungsergänzung|tabletten|kapseln)\b/.test(t))for(const s of S.settings.supps)if(s.active)out.supps[s.id]=true;
   const suppWords=S.settings.supps.flatMap(s=>s.al.split(","));
-  const segs=t.split(/[;\n!?]|\.(?!\d)|,|\bund dann\b|\bund\b|\bdann\b|\bdanach\b|\bplus\b|\bsowie\b|\bdazu\b|\baußerdem\b/).map(s=>s.trim()).filter(Boolean);
+  const G=parseGym(t,sug.gym&&sug.gym.id);
+  if(G.ex.length)out.workouts.push({type:"gym",session:G.session,ex:G.ex,min:Math.max(30,Math.round(G.ex.reduce((s,e)=>s+(e.sets||3),0)*3))});
+  const segs=(" "+G.rest+" ").split(/[;\n!?]|\.(?!\d)|,|\bund dann\b|\bund\b|\bdann\b|\bdanach\b|\bplus\b|\bsowie\b|\bdazu\b|\baußerdem\b/).map(s=>s.trim()).filter(Boolean);
   let lastGym=null;
   for(const seg of segs){
     const stripped=seg.replace(/(geschlafen|schlaf\w*|knie\w*|gewicht|gewogen|wiege|waage|supplements|tabletten|kapseln)/g,"");
     if(/(geschlafen|schlaf|knie|gewicht|gewogen|wiege|supplements)/.test(seg)&&!findFood(stripped))continue;
     if(/\b(hrv|herzfrequenzvariabilität|variabilität|ruhepuls|ruheherzfrequenz|rhr|resting hr|ruhe-?hf|recovery|erholung|regeneration|strain|belastung|whoop|noop|ms|bpm)\b/.test(seg))continue;
     if(suppWords.some(a=>seg.includes(a))&&!findFood(suppWords.reduce((s,a)=>s.split(a).join(" "),seg).replace(/\d+\s*(mg|g|ie|µg)?/g,"")))continue;
-    const ex=parseExercise(seg);
-    if(ex){const sess=sessionFor(ex.name)||lastGym||(sug.gym&&sug.gym.id)||"push";let w=out.workouts.find(w=>w.type==="gym"&&w.session===sess);if(!w){w={type:"gym",session:sess,ex:[],min:60};out.workouts.push(w)}w.ex.push(ex);lastGym=sess;continue}
     const isRun=/(gelaufen|laufen|lauf\b|läufe|joggen|gejoggt|jogging|\brun\b|long ?run|dauerlauf|intervall|fahrtspiel|steigerungen|bergsprints?|5-?km-?test|tempolauf|\d\s*km\b)/.test(seg)&&!/(spazier|wander|gegangen|walk|rad|fahrrad|bike|schwimm|geschwommen)/.test(seg);
     const isWalk=/(spazier|wander|gegangen|walk|hike|power-?hiking)/.test(seg);
     const isSwim=/(schwimm|geschwommen|kraulen|bahnen)/.test(seg);
@@ -356,7 +433,7 @@ function parseText(raw,ds){
       if(w.type==="other")w.name=(seg.match(/(fußball|basketball|tennis|klettern|bouldern|yoga|mobility|stretching|dehnen|rudergerät|crosstrainer|hiit)/)||["Sport"])[0];
       out.workouts.push(w);continue}
     let sess=null;for(const[re,s]of SESSION_RE)if(re.test(seg)){sess=s;break}
-    if((sess||/(\bgym\b|fitnessstudio|krafttraining|\bstudio\b|pumpen|trainiert)/.test(seg))&&!findFood(seg)){const s=sess||(sug.gym&&sug.gym.id)||"push";if(!out.workouts.find(w=>w.type==="gym"&&w.session===s))out.workouts.push({type:"gym",session:s,ex:[],min:60});lastGym=s;continue}
+    if((sess||/(\bgym\b|fitnessstudio|krafttraining|\bstudio\b|pumpen|trainiert)/.test(seg))&&!findFood(seg)){if(out.workouts.some(w=>w.type==="gym"))continue;const s=sess||(sug.gym&&sug.gym.id)||"push";if(!out.workouts.find(w=>w.type==="gym"&&w.session===s))out.workouts.push({type:"gym",session:s,ex:[],min:60});lastGym=s;continue}
     const parts=[];seg.split(/\bmit\b/).forEach((piece,i)=>piece.split(/\s+(?=\d)/).forEach((pp,j)=>parts.push({s:pp.trim(),side:i>0&&j===0})));
     for(let i=0;i<parts.length;i++){const pt=parts[i];if(!pt.s)continue;let f=findFood(pt.s);
       if(!f&&i+1<parts.length&&!/[a-zäöüß]{3,}/.test(pt.s.replace(UNIT_RE,"").replace(/pct[\d.]+/g,"").replace(FILLER,""))){parts[i+1].s=pt.s+" "+parts[i+1].s;continue}
@@ -463,7 +540,7 @@ function previewBox(){
     box.append(h("div",{class:"small num",style:"margin-top:6px"},fmt(n[0])+" kcal · "+fmt(n[1])+" g Protein · "+fmt(n[2])+" g KH · "+fmt(n[3])+" g Fett"));
   }
   box.append(h("button",{class:"link",onclick:()=>openPicker(f=>{P.items.push({fid:f.id,g:f.p||f.u});render()})},"+ Lebensmittel hinzufügen"));
-  P.workouts.forEach((w,i)=>box.append(h("div",{class:"pv-row w"},h("span",{},workoutLine(w)),h("button",{class:"x","aria-label":"Entfernen",onclick:()=>{P.workouts.splice(i,1);render()}},"×"))));
+  P.workouts.forEach((w,i)=>{box.append(h("div",{class:"pv-row w"},h("span",{},workoutLine(w)),h("button",{class:"x","aria-label":"Entfernen",onclick:()=>{P.workouts.splice(i,1);render()}},"×")));if(w.ex&&w.ex.length)box.append(exTable(w.ex))});
   const ex=[];if(P.check.sleep!=null)ex.push("Schlaf "+fmt(P.check.sleep,1)+" h");if(P.check.knee!=null)ex.push("Knie "+P.check.knee+"/10");if(P.check.weight)ex.push("Gewicht "+fmt(P.check.weight,1)+" kg");if(P.check.hrv!=null)ex.push("HRV "+P.check.hrv+" ms");if(P.check.rhr!=null)ex.push("Ruhepuls "+P.check.rhr);if(P.check.rec!=null)ex.push("Recovery "+P.check.rec+" %");if(P.check.strain!=null)ex.push("Strain "+fmt(P.check.strain,1));if(P.strainY!=null)ex.push("Strain gestern "+fmt(P.strainY,1));
   for(const s of S.settings.supps)if(P.supps[s.id])ex.push(s.name);
   if(ex.length)box.append(h("div",{class:"small",style:"margin-top:6px"},"Außerdem: "+ex.join(" · ")));
@@ -474,7 +551,7 @@ function previewBox(){
 function workoutLine(w){
   const nm={run:"Laufen",walk:"Gehen",swim:"Schwimmen",bike:"Rad",other:cap(w.name||"Sport"),gym:"Kraft: "+(GYM[w.session]?GYM[w.session].name:"Gym")}[w.type];
   const m=[];if(w.km)m.push(w.type==="swim"?fmt(w.km*1000)+" m":fmt(w.km,1)+" km");if(w.min)m.push(fmt(w.min)+" min");if(w.type==="run"&&w.km&&w.min)m.push(pace(w.min*60/w.km)+" /km");if(w.rpe)m.push("RPE "+fmt(w.rpe,1));
-  if(w.ex&&w.ex.length)m.push(w.ex.map(e=>e.name+(e.sets?" "+e.sets+"×"+(e.reps||"?"):"")+(e.kg?" "+fmt(e.kg,1)+" kg":"")).join(", "));
+  if(w.ex&&w.ex.length)m.push(w.ex.length+" Übung"+(w.ex.length>1?"en":""));
   return nm+(m.length?" · "+m.join(" · "):"");
 }
 function trainingCard(s,withActions){
@@ -637,7 +714,7 @@ function renderTraining(){
   if(PREVIEW&&PREVIEW.where==="training")root.append(previewBox());
   const ws=hasDay(CUR)?day(CUR).workouts:[];
   root.append(sec(CUR===todayISO()?"Heute trainiert":"Trainiert am "+short(CUR),ws.length?h("span",{class:"num muted small"},fmt(kmOf(CUR),1)+" km"):null,
-    ws.length?h("div",{class:"done-list"},ws.map(w=>h("div",{class:"done-i"},h("span",{},workoutLine(w)),h("button",{class:"x","aria-label":"Löschen",onclick:()=>{day(CUR).workouts=day(CUR).workouts.filter(x=>x!==w);save();render()}},"×"))))
+    ws.length?h("div",{class:"done-list"},ws.map(w=>h("div",{},h("div",{class:"done-i"},h("span",{},workoutLine(w)),h("button",{class:"x","aria-label":"Löschen",onclick:()=>{day(CUR).workouts=day(CUR).workouts.filter(x=>x!==w);save();render()}},"×")),w.ex&&w.ex.length?exTable(w.ex):null)))
       :h("p",{class:"muted small"},"Noch nichts eingetragen. Sprich oben rein, was du gemacht hast, egal ob es zum Vorschlag passt.")));
   const sg=suggest(CUR,3);
   root.append(trainingCard(sg[0],true));
