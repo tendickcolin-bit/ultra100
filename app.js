@@ -58,7 +58,7 @@ function planFor(ds){
 function runsOf(ds){return hasDay(ds)?day(ds).workouts.filter(w=>w.type==="run"):[]}
 function kmOf(ds){return runsOf(ds).reduce((a,w)=>a+(w.km||0),0)}
 function kmRange(from,to){let k=0;for(let d=from;d<=to;d=addDays(d,1))k+=kmOf(d);return k}
-function isHardDay(ds){if(!hasDay(ds))return false;return day(ds).workouts.some(w=>(w.type==="run"&&((w.rpe||0)>=6||(w.km||0)>=20))||((w.type==="swim"||w.type==="bike")&&(w.rpe||0)>=7))}
+function isHardDay(ds){if(!hasDay(ds))return false;if((day(ds).check.strain||0)>=15)return true;return day(ds).workouts.some(w=>(w.type==="run"&&((w.rpe||0)>=6||(w.km||0)>=20))||((w.type==="swim"||w.type==="bike")&&(w.rpe||0)>=7))}
 function gymOf(ds){return hasDay(ds)?day(ds).workouts.filter(w=>w.type==="gym"):[]}
 function zones(){
   const p5=S.settings.p5;
@@ -82,9 +82,19 @@ function prescribe(ex,sets){
   else{reps=Math.min(hi,(last.reps||lo)+1);hint="Gleiches Gewicht, 1 Wdh. mehr als letztes Mal"}
   return{name,sets,reps,kg,range:lo===hi?String(lo):lo+"–"+hi,hint};
 }
-function ampelOf(ch){if(!ch)return null;const f=ch.flags||[];if(ch.sleep==null&&ch.knee==null&&!f.length)return null;
-  if((ch.knee??0)>=5||f.includes("fieber")||f.includes("hinken"))return"rot";
-  if(f.includes("müde")||f.includes("stress")||(ch.sleep!=null&&ch.sleep<6.5)||(ch.knee??0)>=3)return"gelb";return"grün"}
+/* Körperwerte (WHOOP/Noop, Apple Health oder von Hand): Basis = Ø der 28 Tage davor */
+function bioBase(ds,k){const v=[];for(let i=1;i<=28;i++){const x=addDays(ds,-i);if(hasDay(x)&&day(x).check[k]!=null)v.push(day(x).check[k])}return v.length>=4?v.reduce((a,b)=>a+b,0)/v.length:null}
+function readiness(ds){const ch=hasDay(ds)?day(ds).check:{};const r={sig:0,rot:false,why:[],good:false};
+  if(ch.rec!=null){if(ch.rec<34){r.sig++;r.why.push("Recovery "+fmt(ch.rec)+" % (rot)")}else if(ch.rec>=67)r.good=true}
+  const bh=bioBase(ds,"hrv"),br=bioBase(ds,"rhr");let hd=false,rd=false;
+  if(ch.hrv!=null&&bh){if(ch.hrv<0.85*bh){r.sig++;hd=ch.hrv<0.75*bh;r.why.push("HRV "+fmt(ch.hrv)+" ms, sonst Ø "+fmt(bh))}}
+  if(ch.rhr!=null&&br){if(ch.rhr>=br+5){r.sig++;rd=ch.rhr>=br+8;r.why.push("Ruhepuls "+fmt(ch.rhr)+", sonst Ø "+fmt(br))}}
+  if(hd&&rd){r.rot=true}
+  return r}
+function ampelOf(ch,ds){if(!ch)return null;const f=ch.flags||[];const R=ds?readiness(ds):{sig:0,rot:false};
+  if(ch.sleep==null&&ch.knee==null&&!f.length&&ch.rec==null&&ch.hrv==null&&ch.rhr==null)return null;
+  if((ch.knee??0)>=5||f.includes("fieber")||f.includes("hinken")||R.rot)return"rot";
+  if(f.includes("müde")||f.includes("stress")||(ch.sleep!=null&&ch.sleep<6.5)||(ch.knee??0)>=3||R.sig>0)return"gelb";return"grün"}
 function runDesc(kind,key,km,z,extra={}){
   const GA=zoneTxt(z.GA);
   if(kind==="rest")return{title:"Lauffrei",detail:"Erholung gehört zum Training. Gern 20–30 min spazieren."};
@@ -112,7 +122,7 @@ function suggest(from,n=3){
   for(let i=0;i<n;i++){
     const ds=addDays(from,i),p=planFor(ds),z=zones(),why=[];
     const d=hasDay(ds)?day(ds):null;
-    const amp=ds===today&&d?ampelOf(d.check):null;
+    const amp=ds===today&&d?ampelOf(d.check,ds):null;const R=ds===today&&d?readiness(ds):null;
     let kind="rest",km=0,key=null,extra={};
     if(p.wk){kind=p.run.kind;km=p.run.km;key=p.run.key;extra={hilly:p.run.hilly}}
     else if(p.pre){const dw=dowOf(ds);if(dw===1||dw===3||dw===5){kind="easy";km=6}}
@@ -128,8 +138,9 @@ function suggest(from,n=3){
     // Wochensumme
     if(p.wk&&km>0){const mon=addDays(ds,-p.dow);const done=kmRange(mon,addDays(ds,-1));if(done+km>p.sum*1.15&&kind!=="race"){const nk=Math.max(0,Math.round((p.sum*1.1-done)*2)/2);if(nk<km){why.push(`Diese Woche schon ${fmt(done,1)} von ${p.sum} km: heute weniger.`);km=nk;if(km<3){kind="rest";km=0}}}}
     // Ampel
-    if(amp==="gelb"&&km>0){km=Math.round(km*0.7*2)/2;if(kind==="key"||kind==="strides")kind="easy";why.push("Ampel gelb: alles locker, Umfang −30 %.")}
-    if(amp==="rot"){kind="rest";km=0;why.push("Ampel rot: Pause. Hält es 3 Tage an, zum Arzt oder Physio.")}
+    if(amp==="gelb"&&km>0){km=Math.round(km*0.7*2)/2;if(kind==="key"||kind==="strides")kind="easy";why.push("Ampel gelb"+(R&&R.why.length?" ("+R.why.join(", ")+")":"")+": alles locker, Umfang −30 %.")}
+    if(amp==="rot"){kind="rest";km=0;why.push(R&&R.rot?"HRV deutlich unten und Ruhepuls deutlich oben: oft ein Zeichen, dass ein Infekt kommt. Heute Pause.":"Ampel rot: Pause. Hält es 3 Tage an, zum Arzt oder Physio.")}
+    if(amp==="grün"&&R&&R.good&&kind==="key")why.push("Recovery grün: gute Voraussetzungen für die Schlüsseleinheit.");
     const knee=d&&d.check.knee;
     if(knee>=3&&knee<5&&km>0)why.push("Knie "+knee+"/10: Alternative wäre 40 min locker Rad oder Schwimmen.");
     const run=runDesc(kind,key,km,z,extra);
@@ -303,9 +314,14 @@ function parseText(raw,ds){
   const t=normalize(raw);let m;
   const mealM=t.match(/\b(frühstück|mittagessen|mittag|abendessen|abend|snack|vor dem training|nach dem training|im lauf|beim laufen|vor dem schlafen)\b/);
   if(mealM)out.meal={mittagessen:"mittag",abendessen:"abend","beim laufen":"im lauf"}[mealM[1]]||mealM[1];
-  if((m=t.match(/(\d+(?:\.\d+)?)\s*(?:h|std|stunden?)\s*(?:lang\s*)?(?:geschlafen|schlaf)/))||(m=t.match(/(?:geschlafen|schlaf)\w*\s*(?:nur\s*|ca\s*|etwa\s*)?(\d+(?:\.\d+)?)/)))out.check.sleep=+m[1];
+  if((m=t.match(/(?:schlaf|sleep)\w*\D{0,6}(\d{1,2}):(\d{2})\b/)))out.check.sleep=Math.round((+m[1]+ +m[2]/60)*100)/100;
+  else if((m=t.match(/(\d+(?:\.\d+)?)\s*(?:h|std|stunden?)\s*(?:lang\s*)?(?:geschlafen|schlaf)/))||(m=t.match(/(?:geschlafen|schlaf)\w*\s*(?:nur\s*|ca\s*|etwa\s*)?(\d+(?:\.\d+)?)/)))out.check.sleep=+m[1];
   if((m=t.match(/knie\w*\s*(?:bei|auf|ist|war|schmerz\w*|so)?\s*(\d+)/)))out.check.knee=+m[1];
   if((m=t.match(/(?:gewicht|wiege|gewogen|waage)\D{0,12}(\d{2,3}(?:\.\d)?)/))||(m=t.match(/(\d{2,3}(?:\.\d)?)\s*(?:kg|kilo)\s*(?:gewogen|gewicht|auf der waage)/)))out.check.weight=+m[1];
+  if((m=t.match(/\b(?:hrv|herzfrequenzvariabilität|variabilität)\D{0,10}(\d{2,3})/)))out.check.hrv=+m[1];
+  if((m=t.match(/\b(?:ruhepuls|ruheherzfrequenz|rhr|resting hr|ruhe-?hf)\D{0,10}(\d{2,3})/)))out.check.rhr=+m[1];
+  if((m=t.match(/\b(?:recovery|erholung|regeneration)\D{0,10}(\d{1,3})\s*(?:%|prozent)?/))&&+m[1]<=100)out.check.rec=+m[1];
+  if((m=t.match(/\b(?:strain|belastung)\s*(gestern)?\D{0,10}?(\d{1,2}(?:\.\d)?)/))&&+m[2]<=21){if(m[1]||/strain\D{0,12}gestern|gestern\D{0,12}strain/.test(t))out.strainY=+m[2];else out.check.strain=+m[2]}
   out.supps=suppIn(t);
   if(/\b(alle|meine)\s+(supplements|supps|nahrungsergänzung|tabletten|kapseln)\b/.test(t))for(const s of S.settings.supps)if(s.active)out.supps[s.id]=true;
   const suppWords=S.settings.supps.flatMap(s=>s.al.split(","));
@@ -314,6 +330,7 @@ function parseText(raw,ds){
   for(const seg of segs){
     const stripped=seg.replace(/(geschlafen|schlaf\w*|knie\w*|gewicht|gewogen|wiege|waage|supplements|tabletten|kapseln)/g,"");
     if(/(geschlafen|schlaf|knie|gewicht|gewogen|wiege|supplements)/.test(seg)&&!findFood(stripped))continue;
+    if(/\b(hrv|herzfrequenzvariabilität|variabilität|ruhepuls|ruheherzfrequenz|rhr|resting hr|ruhe-?hf|recovery|erholung|regeneration|strain|belastung|whoop|noop|ms|bpm)\b/.test(seg))continue;
     if(suppWords.some(a=>seg.includes(a))&&!findFood(suppWords.reduce((s,a)=>s.split(a).join(" "),seg).replace(/\d+\s*(mg|g|ie|µg)?/g,"")))continue;
     const ex=parseExercise(seg);
     if(ex){const sess=sessionFor(ex.name)||lastGym||(sug.gym&&sug.gym.id)||"push";let w=out.workouts.find(w=>w.type==="gym"&&w.session===sess);if(!w){w={type:"gym",session:sess,ex:[],min:60};out.workouts.push(w)}w.ex.push(ex);lastGym=sess;continue}
@@ -359,6 +376,7 @@ function commit(ds,P){
   for(const w of P.workouts){d.workouts.push({...w,id:uid()});if(w.type==="run"&&w.test&&w.km>=4.8&&w.km<=5.3&&w.min){S.settings.p5=w.min*60/w.km;S.settings.p5date=ds;toast("Neue Zonen aus deinem 5-km-Test")}}
   for(const[k,v]of Object.entries(P.check))if(v!=null)d.check[k]=v;
   if(P.check.weight)S.settings.weight=P.check.weight;
+  if(P.strainY!=null)day(addDays(ds,-1)).check.strain=P.strainY;
   Object.assign(d.supps,P.supps);save();
 }
 function guessMeal(){const x=new Date().getHours();return x<10?"frühstück":x<12?"snack":x<15?"mittag":x<18?"snack":x<22?"abend":"vor dem schlafen"}
@@ -431,7 +449,7 @@ function previewBox(){
   }
   box.append(h("button",{class:"link",onclick:()=>openPicker(f=>{P.items.push({fid:f.id,g:f.p||f.u});render()})},"+ Lebensmittel hinzufügen"));
   P.workouts.forEach((w,i)=>box.append(h("div",{class:"pv-row w"},h("span",{},workoutLine(w)),h("button",{class:"x","aria-label":"Entfernen",onclick:()=>{P.workouts.splice(i,1);render()}},"×"))));
-  const ex=[];if(P.check.sleep!=null)ex.push("Schlaf "+fmt(P.check.sleep,1)+" h");if(P.check.knee!=null)ex.push("Knie "+P.check.knee+"/10");if(P.check.weight)ex.push("Gewicht "+fmt(P.check.weight,1)+" kg");
+  const ex=[];if(P.check.sleep!=null)ex.push("Schlaf "+fmt(P.check.sleep,1)+" h");if(P.check.knee!=null)ex.push("Knie "+P.check.knee+"/10");if(P.check.weight)ex.push("Gewicht "+fmt(P.check.weight,1)+" kg");if(P.check.hrv!=null)ex.push("HRV "+P.check.hrv+" ms");if(P.check.rhr!=null)ex.push("Ruhepuls "+P.check.rhr);if(P.check.rec!=null)ex.push("Recovery "+P.check.rec+" %");if(P.check.strain!=null)ex.push("Strain "+fmt(P.check.strain,1));if(P.strainY!=null)ex.push("Strain gestern "+fmt(P.strainY,1));
   for(const s of S.settings.supps)if(P.supps[s.id])ex.push(s.name);
   if(ex.length)box.append(h("div",{class:"small",style:"margin-top:6px"},"Außerdem: "+ex.join(" · ")));
   if(P.unknown.length)box.append(h("div",{class:"small warn-t",style:"margin-top:6px"},"Nicht erkannt: „"+P.unknown.join("“, „")+"“. Tipp auf „+ Lebensmittel hinzufügen“ und such danach."));
@@ -470,14 +488,22 @@ function trainingCard(s,withActions){
   return c;
 }
 function checkSec(){
-  const d=day(CUR),ch=d.check,a=ampelOf(ch);
-  const inp=(id,ph,val,step)=>{const i=h("input",{id,type:"number",inputmode:"decimal",step,placeholder:ph,value:val??""});i.onchange=()=>{const v=i.value.replace(",",".");const k={cSleep:"sleep",cKnee:"knee",cW:"weight"}[id];ch[k]=v===""?null:+v;if(k==="weight"&&ch.weight)S.settings.weight=ch.weight;save();render()};return i};
+  const d=day(CUR),ch=d.check,a=ampelOf(ch,CUR),R=readiness(CUR);
+  const inp=(id,ph,val,step)=>{const i=h("input",{id,type:"number",inputmode:"decimal",step,placeholder:ph,value:val??""});i.onchange=()=>{const v=i.value.replace(",",".");const k={cSleep:"sleep",cKnee:"knee",cW:"weight",cHrv:"hrv",cRhr:"rhr",cRec:"rec",cStr:"strain"}[id];ch[k]=v===""?null:+v;if(k==="weight"&&ch.weight)S.settings.weight=ch.weight;save();render()};return i};
   const M={"grün":["good","Grün","Plan wie vorgeschlagen."],"gelb":["warn","Gelb","Tempo raus, Umfang −30 %, 1 Satz weniger."],"rot":["bad","Rot","Pause. Hält es 3 Tage an: Arzt oder Physio."]};
   const flag=(f,l)=>h("button",{class:"chip","aria-pressed":(ch.flags||[]).includes(f)?"true":"false",onclick:()=>{ch.flags=ch.flags||[];ch.flags=ch.flags.includes(f)?ch.flags.filter(x=>x!==f):[...ch.flags,f];save();render()}},l);
   return sec("Morgen-Check",a?h("span",{class:"pill "+M[a][0]},M[a][1]):h("span",{class:"muted small"},"offen"),
     h("div",{class:"grid3"},h("label",{},"Schlaf (h)",inp("cSleep","8",ch.sleep,"0.25")),h("label",{},"Knie (0–10)",inp("cKnee","0",ch.knee,"1")),h("label",{},"Gewicht (kg)",inp("cW","78,0",ch.weight,"0.1"))),
+    h("div",{class:"grid2",style:"margin-top:8px"},h("label",{},"HRV (ms)",inp("cHrv","60",ch.hrv,"1")),h("label",{},"Ruhepuls",inp("cRhr","52",ch.rhr,"1")),h("label",{},"Recovery (%)",inp("cRec","70",ch.rec,"1")),h("label",{},"Strain (0–21)",inp("cStr","10",ch.strain,"0.1"))),
     h("div",{class:"chips"},flag("müde","müde"),flag("stress","Prüfungsstress"),flag("fieber","Fieber"),flag("hinken","Hinken")),
-    a?h("div",{class:"small muted"},M[a][2]):null);
+    h("button",{class:"link",onclick:pasteVitals},"Werte aus der Zwischenablage einfügen"),
+    a?h("div",{class:"small muted"},M[a][2]+(R.why.length?" Grund: "+R.why.join(", ")+".":"")):null);
+}
+async function pasteVitals(){let t="";try{t=await navigator.clipboard.readText()}catch(e){}
+  if(!t){toast("Zwischenablage leer oder nicht erlaubt");return}
+  const P=parseText(t,CUR);const c={};for(const k of["sleep","hrv","rhr","rec","strain","weight"])if(P.check[k]!=null)c[k]=P.check[k];
+  if(!Object.keys(c).length&&P.strainY==null){toast("Keine Werte erkannt");return}
+  commit(CUR,{items:[],workouts:[],check:c,supps:{},strainY:P.strainY});toast("Werte übernommen");render()
 }
 function suppSec(){
   const d=day(CUR);const act=S.settings.supps.filter(s=>s.active);
@@ -664,16 +690,18 @@ function renderFortschritt(){
     short_.append(progRow(r.n,fmt(r.last.e1,1)+" kg",pct!=null?h("span",{class:pct>=0?"ok-t":"warn-t"},(pct>=0?"+":"−")+fmt(Math.abs(pct),1)+" %"):h("span",{class:"muted"},"erster Wert"),"zuletzt "+r.last.reps+" × "+kgf(r.last.kg)+" kg am "+short(r.last.ds)))}
   root.append(short_);
   // Longevity langfristig
-  const win=(a,b)=>{const ds=[];for(let d=a;d<=b;d=addDays(d,1))ds.push(d);const fed=ds.filter(d=>hasDay(d)&&day(d).entries.length);const sl=ds.map(d=>hasDay(d)?day(d).check.sleep:null).filter(x=>x!=null);
+  const win=(a,b)=>{const ds=[];for(let d=a;d<=b;d=addDays(d,1))ds.push(d);const fed=ds.filter(d=>hasDay(d)&&day(d).entries.length);const sl=ds.map(d=>hasDay(d)?day(d).check.sleep:null).filter(x=>x!=null);const av=k=>{const v=ds.map(d=>hasDay(d)?day(d).check[k]:null).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null};
     const micro=NUTR.filter(n=>(n[5]==="v"||n[5]==="n")&&n[0]!=="na"&&n[3]>0);
     const avg=f=>fed.length?fed.reduce((s,d)=>s+f(totals(d)),0)/fed.length:null;
-    return{n:fed.length,sleep:sl.length?sl.reduce((a,b)=>a+b,0)/sl.length:null,cover:avg(T=>micro.reduce((s,n)=>s+ratio(T[n[0]],n[3]),0)/micro.length*100),fib:avg(T=>T.fib),veg:avg(T=>T.veg),o3w:fed.length?fed.reduce((s,d)=>s+totals(d).o3,0)/fed.length*7:null,
+    return{hrv:av("hrv"),rhr:av("rhr"),n:fed.length,sleep:sl.length?sl.reduce((a,b)=>a+b,0)/sl.length:null,cover:avg(T=>micro.reduce((s,n)=>s+ratio(T[n[0]],n[3]),0)/micro.length*100),fib:avg(T=>T.fib),veg:avg(T=>T.veg),o3w:fed.length?fed.reduce((s,d)=>s+totals(d).o3,0)/fed.length*7:null,
       move:ds.filter(d=>{const w=workSum(d);return w.km||w.gym||w.walk>=30||w.other>=20}).length/ds.length*100,alc:fed.length?fed.reduce((s,d)=>s+totals(d).alc,0)/ds.length*7:null}};
   const L=win(addDays(today,-27),today),P=win(addDays(today,-55),addDays(today,-28));
   const lon=sec("Longevity",h("span",{class:"muted tiny"},"Ø 4 Wochen gegen die 4 davor"));
   if(L.n<2)lon.append(h("p",{class:"muted small"},"Trag ein paar Tage Essen und Schlaf ein, dann siehst du hier deine langfristigen Trends."));
   else{
     lon.append(progRow("Schlaf",L.sleep!=null?fmt(L.sleep,1)+" h":"–",delta(L.sleep,P.sleep,"h",1),"Ziel 8–9 h"));
+    if(L.hrv!=null)lon.append(progRow("HRV",fmt(L.hrv)+" ms",delta(L.hrv,P.hrv,"ms"),"höher ist besser, steigt mit Ausdauer und Schlaf"));
+    if(L.rhr!=null)lon.append(progRow("Ruhepuls",fmt(L.rhr),delta(L.rhr,P.rhr,"",0,true),"sinkt, wenn die Ausdauer wächst"));
     lon.append(progRow("Vitamine & Mineralstoffe",fmt(L.cover)+" %",delta(L.cover,P.cover,"%"),"Ø Abdeckung der Tagesziele"));
     lon.append(progRow("Ballaststoffe",fmt(L.fib)+" g",delta(L.fib,P.fib,"g"),"Ziel 38 g"));
     lon.append(progRow("Obst & Gemüse",fmt(L.veg)+" g",delta(L.veg,P.veg,"g"),"Ziel 500 g"));
