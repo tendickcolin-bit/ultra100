@@ -309,7 +309,7 @@ const EX_RE=new RegExp("(^|[^a-zäöüß])("+EX_ALIAS.map(a=>esc(a[0])).join("|"
 const EX_MAP=Object.fromEntries(EX_ALIAS);
 const EQ=[[/\b(?:e\s?-?\s?z|s\s?-?\s?z|easy\s?-?\s?bar|easybar|isi\s?bar)(?:\s?-?\s?(?:stange|hantel|bar|curl\w*))?\b|\bezstange\b|\bszstange\b/,"SZ-Stange"],[/\b(?:kurzhantel\w*|kh|dumbbells?)\b/,"Kurzhantel"],[/\b(?:langhantel\w*|lh|barbell)\b/,"Langhantel"],[/\b(?:kabel\w*|cable|seilzug|seil)\b/,"Kabel"],[/\b(?:maschine|gerät|machine)\b/,"Maschine"],[/\b(?:multipresse|smith)\b/,"Multipresse"],[/\b(?:kettlebell|kugelhantel)\b/,"Kettlebell"],[/\b(?:widerstandsband|theraband|band)\b/,"Band"]];
 const GYMW=/(\d\s*(?:x|×|\*|mal)\s*\d|\b(?:sätze|satz|wdh|wiederholung\w*|reps?|kg|kilo|supersatz|superset|pro seite|pro hand|je seite|körpergewicht|eigengewicht|versagen|rir|rpe|aufwärmsatz|aufwärmsätze|warm ?up)\b)/;
-const SEP=/[.;!?\n]+|,(?!\s*\d)|\b(?:und dann|dann noch|danach|anschließend|als nächstes|zum schluss|zum abschluss|außerdem)\b/;
+const SEP=/[.;!?\n]+|,(?!\s*\d+(?:\.\d+)?\s*(?:,|\/|kg|kilo|wdh|wiederholung\w*|reps?|sätze|satz|x|×|mal|und|$))|\b(?:und dann|dann noch|danach|anschließend|als nächstes|zum schluss|zum abschluss|außerdem)\b/;
 function parseSets(r){
   const e={};let m;const notes=[];
   const nums=[...r.matchAll(/\d+(?:\.\d+)?/g)].length;
@@ -539,13 +539,14 @@ function previewBox(){
       box.append(h("div",{class:"pv-row"},h("div",{},h("button",{class:"pv-name",onclick:()=>openPicker(f=>{it.fid=f.id;delete it.n;delete it.look;if(it.q){S.learn[it.q]=f.id;save()}render()})},itemName(it)),it.pending?h("div",{class:"tiny muted"},"Suche genaues Produkt …"):it.off?h("div",{class:"tiny muted"},"Produkt aus Open Food Facts"+(it.gen?" · fehlende Vitamine ergänzt":"")+" · ",h("button",{class:"link tiny",onclick:()=>{it.fid=it.gen||it.fid;it.off=false;if(it.q)delete S.learn[it.q];save();render()}},"allgemein nehmen")):it.offMiss?h("div",{class:"tiny muted"},"Genaues Produkt nicht gefunden, Durchschnittswerte"):null),gi,h("span",{class:"muted tiny num"},"g · "+fmt(nn[0])+" kcal"),h("button",{class:"x","aria-label":"Entfernen",onclick:()=>{P.items.splice(i,1);render()}},"×")))});
     box.append(h("div",{class:"small num",style:"margin-top:6px"},fmt(n[0])+" kcal · "+fmt(n[1])+" g Protein · "+fmt(n[2])+" g KH · "+fmt(n[3])+" g Fett"));
   }
-  box.append(h("button",{class:"link",onclick:()=>openPicker(f=>{P.items.push({fid:f.id,g:f.p||f.u});render()})},"+ Lebensmittel hinzufügen"));
-  P.workouts.forEach((w,i)=>{box.append(h("div",{class:"pv-row w"},h("span",{},workoutLine(w)),h("button",{class:"x","aria-label":"Entfernen",onclick:()=>{P.workouts.splice(i,1);render()}},"×")));if(w.ex&&w.ex.length)box.append(exTable(w.ex))});
+  if(P.where!=="training"||P.items.length)box.append(h("button",{class:"link",onclick:()=>openPicker(f=>{P.items.push({fid:f.id,g:f.p||f.u});render()})},"+ Lebensmittel hinzufügen"));
+  P.workouts.forEach((w,i)=>{box.append(h("div",{class:"pv-row w"},h("span",{},workoutLine(w)),h("button",{class:"x","aria-label":"Entfernen",onclick:()=>{P.workouts.splice(i,1);render()}},"×")));box.append(wEditor(w,re=>{if(re)render()}))});
+  if(P.where==="training")box.append(addUnitRow(w=>{P.workouts.push(w);render()}));
   const ex=[];if(P.check.sleep!=null)ex.push("Schlaf "+fmt(P.check.sleep,1)+" h");if(P.check.knee!=null)ex.push("Knie "+P.check.knee+"/10");if(P.check.weight)ex.push("Gewicht "+fmt(P.check.weight,1)+" kg");if(P.check.hrv!=null)ex.push("HRV "+P.check.hrv+" ms");if(P.check.rhr!=null)ex.push("Ruhepuls "+P.check.rhr);if(P.check.rec!=null)ex.push("Recovery "+P.check.rec+" %");if(P.check.strain!=null)ex.push("Strain "+fmt(P.check.strain,1));if(P.strainY!=null)ex.push("Strain gestern "+fmt(P.strainY,1));
   for(const s of S.settings.supps)if(P.supps[s.id])ex.push(s.name);
   if(ex.length)box.append(h("div",{class:"small",style:"margin-top:6px"},"Außerdem: "+ex.join(" · ")));
   if(P.unknown.length)box.append(h("div",{class:"small warn-t",style:"margin-top:6px"},"Nicht erkannt: „"+P.unknown.join("“, „")+"“. Tipp auf „+ Lebensmittel hinzufügen“ und such danach."));
-  box.append(h("button",{class:"btn primary wide",onclick:()=>{P.items=P.items.filter(it=>!it.look);commit(CUR,P);PREVIEW=null;const q=$("#qIn");if(q)q.value="";toast("Gespeichert");render()}},"Speichern"));
+  box.append(h("button",{class:"btn primary wide",onclick:()=>{P.items=P.items.filter(it=>!it.look);P.workouts=P.workouts.map(cleanW).filter(w=>w.type!=="gym"||w.ex.length||w.session);commit(CUR,P);PREVIEW=null;const q=$("#qIn");if(q)q.value="";toast("Gespeichert");render()}},"Speichern"));
   return box;
 }
 function workoutLine(w){
@@ -705,7 +706,61 @@ function renderErnaehrung(){
     h("div",{class:"nr"},h("span",{},"Gesättigte Fette"),h("span",{class:"num muted"},fmt(T.sfa)+" g, Ziel < "+fmt(tg.kcal*0.1/9)+" g"),h("span",{}),h("span",{})));
   root.append(sec("Alle Nährstoffe",h("span",{class:"muted tiny"},"Ziele: optimal, unter den Obergrenzen"),m,grp("Vitamine","v"),grp("Mineralstoffe","n"),grp("Fettsäuren","o"),grp("Pflanzenstoffe & Kreatin","x"),
     h("p",{class:"muted tiny"},"Nährwerte sind Durchschnittswerte, keine Laborwerte. Jod und Biotin sind in den meisten Tabellen lückenhaft, beim Jod hilft Jodsalz. Rot heißt über der sicheren Obergrenze.")));
+  root.append(gapSec());
 }
+
+
+/* ---------- Einheit bearbeiten ---------- */
+let EDIT=null;
+const WTYPES=[["run","Laufen"],["gym","Kraft"],["swim","Schwimmen"],["bike","Rad"],["walk","Gehen"],["other","Sonstiges"]];
+function parseList(v){return String(v).replace(/kg|kilo|wdh\.?|x/gi,"").split(/[\/,;\s]+/).map(x=>x.replace(",",".")).filter(x=>x!==""&&!isNaN(+x)).map(Number)}
+function setReps(e,v){delete e.repList;delete e.reps;const l=parseList(v);if(l.length>1){e.repList=l;e.reps=l[l.length-1];if(!e.sets||e.sets<l.length)e.sets=l.length}else if(l.length)e.reps=l[0]}
+function setKg(e,v){delete e.kgList;delete e.kg;delete e.bw;if(/körper|eigen|bw/i.test(v)){e.bw=true;return}const l=/^\s*\d+,\d{1,3}\s*(kg)?\s*$/i.test(v)?[+v.replace(/kg/i,"").replace(",",".")]:parseList(v);if(l.length>1){e.kgList=l;e.kg=Math.max(...l)}else if(l.length)e.kg=l[0]}
+function wEditor(w,changed){
+  const box=h("div",{class:"wed"});
+  const inp=(val,ph,on,mode="decimal",cls="")=>{const i=h("input",{type:"text",inputmode:mode,placeholder:ph,value:val??"",class:cls});i.onchange=()=>{on(i.value.trim());changed(false)};return i};
+  if(w.type==="gym"){
+    w.ex??=[];
+    const tb=h("table",{class:"ex-t ex-ed"},h("thead",{},h("tr",{},h("th",{},"Übung"),h("th",{},"Sätze"),h("th",{},"Wdh."),h("th",{},"Gewicht"),h("th",{}))));
+    const body=h("tbody",{});
+    w.ex.forEach((e,i)=>body.append(h("tr",{},
+      h("td",{},inp(e.name,"Übung",v=>e.name=v||"Übung","text","n")),
+      h("td",{},inp(e.sets,"3",v=>{const n=parseInt(v);if(n>0)e.sets=n;else delete e.sets},"numeric","s")),
+      h("td",{},inp(e.repList?e.repList.join("/"):e.reps,"10",v=>setReps(e,v),"text","r")),
+      h("td",{},inp(e.kgList?e.kgList.join("/"):e.bw?"Körpergewicht":e.kg,"kg",v=>setKg(e,v),"text","k")),
+      h("td",{},h("button",{class:"x","aria-label":"Übung entfernen",onclick:()=>{w.ex.splice(i,1);changed(true)}},"×")))));
+    tb.append(body);box.append(tb);
+    box.append(h("button",{class:"link",onclick:()=>{w.ex.push({name:""});changed(true);setTimeout(()=>{const ns=[...document.querySelectorAll(".ex-ed input.n")];ns.length&&ns[ns.length-1].focus()},30)}},"+ Übung hinzufügen"));
+    box.append(h("p",{class:"muted tiny"},"Mehrere Sätze verschieden? Einfach „10/8/6“ bzw. „60/65/70“ eintragen. Gewicht leer lassen, wenn keins."));
+  }else{
+    const g=h("div",{class:"grid3"});
+    if(w.type==="swim")g.append(h("label",{},"Meter",inp(w.km?Math.round(w.km*1000):"","1500",v=>{const n=+v.replace(",",".");if(n>0)w.km=n/1000;else delete w.km})));
+    else if(w.type!=="other")g.append(h("label",{},"km",inp(w.km,"8",v=>{const n=+v.replace(",",".");if(n>0)w.km=n;else delete w.km})));
+    g.append(h("label",{},"Minuten",inp(w.min,"50",v=>{const n=+v.replace(",",".");if(n>0)w.min=n;else delete w.min})),h("label",{},"RPE 1–10",inp(w.rpe,"4",v=>{const n=+v.replace(",",".");if(n>0)w.rpe=n;else delete w.rpe})));
+    box.append(g);
+    if(w.type==="other")box.append(h("label",{},"Was",inp(w.name,"z. B. Fußball, Yoga",v=>w.name=v,"text")));
+  }
+  return box}
+function addUnitRow(onAdd){return h("div",{class:"add-unit"},h("span",{class:"small"},"+ Einheit hinzufügen:"),h("div",{class:"chips"},WTYPES.map(([t,l])=>h("button",{class:"chip",onclick:()=>onAdd(t==="gym"?{type:"gym",session:(suggest(CUR,1)[0].gym||{id:"push"}).id,ex:[{name:""}],min:60}:{type:t,rpe:4})},l))))}
+function cleanW(w){if(w.ex)w.ex=w.ex.filter(e=>e.name&&e.name.trim());if(w.type==="run"&&w.km&&!w.min)w.min=Math.round(w.km*6.8);if(w.type==="run"&&w.min&&!w.km)w.km=Math.round(w.min/6.8*10)/10;return w}
+
+/* ---------- Heute noch zu wenig ---------- */
+let EXAMPLES=null;
+function exampleFor(k){
+  if(!EXAMPLES){EXAMPLES={};const skip=new Set(["salz","tee","kaffee","whey","zucker","honig","sportdrink","gel","proteinriegel","hefeflocken","nori","leber","huehnerleber","austern","kokosoel","ghee","butter","oel","rapsoel","leinoel","evoo","kresse","knoblauch","ingwer","goji"]);
+    const c=FOOD_LIST.filter(f=>!/[sxa]/.test(f.fl)&&!skip.has(f.id));
+    for(const n of NUTR){const i=NI[n[0]];if(!n[3])continue;const best=c.map(f=>({f,v:(f.n[i]||0)*(f.p||f.u||100)/100})).sort((a,b)=>b.v-a.v).slice(0,2).filter(x=>x.v>0);
+      EXAMPLES[n[0]]=best.map(x=>x.f.name.split(/ \/ | \(/)[0])}
+    EXAMPLES.p=["Hähnchenbrust","Skyr"];EXAMPLES.fib=["Linsen","Haferflocken"]}
+  return(EXAMPLES[k]||[]).join(", ")}
+function gapSec(){
+  const T=totals(CUR),tg=targetsFor(CUR);
+  const rows=[["p","Protein",T.p,tg.p,"g",0],["fib","Ballaststoffe",T.fib,NMETA.fib.t,"g",0],...NUTR.filter(n=>"vnox".includes(n[5])&&n[3]>0&&n[0]!=="na").map(n=>[n[0],n[1],T[n[0]],n[3],n[2],n[6]])]
+    .map(([k,l,v,t,u,d])=>({k,l,v,t,u,d,r:t?v/t:1})).filter(x=>x.r<1).sort((a,b)=>a.r-b.r);
+  if(!rows.length)return sec("Nährstoffe heute",null,h("p",{class:"small ok-t"},"Alles gedeckt."));
+  return sec("Heute noch zu wenig",h("span",{class:"muted tiny"},rows.length+" von "+(NUTR.filter(n=>"vnox".includes(n[5])&&n[3]>0&&n[0]!=="na").length+2)),
+    h("ul",{class:"gap"},rows.map(x=>{const ex=exampleFor(x.k);return h("li",{},h("span",{},h("b",{},x.l),ex?" ("+ex+")":""),h("span",{class:"num"},fmt(Math.min(x.r*100,99))+" %"))})),
+    h("p",{class:"muted tiny"},"In Klammern: Lebensmittel mit besonders viel davon pro Portion."))}
 
 /* ---------- Training ---------- */
 function renderTraining(){
@@ -714,8 +769,12 @@ function renderTraining(){
   if(PREVIEW&&PREVIEW.where==="training")root.append(previewBox());
   const ws=hasDay(CUR)?day(CUR).workouts:[];
   root.append(sec(CUR===todayISO()?"Heute trainiert":"Trainiert am "+short(CUR),ws.length?h("span",{class:"num muted small"},fmt(kmOf(CUR),1)+" km"):null,
-    ws.length?h("div",{class:"done-list"},ws.map(w=>h("div",{},h("div",{class:"done-i"},h("span",{},workoutLine(w)),h("button",{class:"x","aria-label":"Löschen",onclick:()=>{day(CUR).workouts=day(CUR).workouts.filter(x=>x!==w);save();render()}},"×")),w.ex&&w.ex.length?exTable(w.ex):null)))
-      :h("p",{class:"muted small"},"Noch nichts eingetragen. Sprich oben rein, was du gemacht hast, egal ob es zum Vorschlag passt.")));
+    ws.length?h("div",{class:"done-list"},ws.map(w=>{const ed=EDIT===w.id;return h("div",{class:ed?"done-ed":""},h("div",{class:"done-i"},h("span",{},workoutLine(w)),
+        h("span",{class:"done-a"},h("button",{class:"link",onclick:()=>{if(ed){cleanW(w);save();EDIT=null;toast("Gespeichert")}else EDIT=w.id;render()}},ed?"Fertig":"Bearbeiten"),
+          h("button",{class:"x","aria-label":"Löschen",onclick:()=>{day(CUR).workouts=day(CUR).workouts.filter(x=>x!==w);save();render()}},"×"))),
+        ed?wEditor(w,re=>{save();if(re)render()}):w.ex&&w.ex.length?exTable(w.ex):null)}))
+      :h("p",{class:"muted small"},"Noch nichts eingetragen. Sprich oben rein, was du gemacht hast, egal ob es zum Vorschlag passt."),
+    addUnitRow(w=>{w.id=uid();day(CUR).workouts.push(w);EDIT=w.id;save();render()})));
   const sg=suggest(CUR,3);
   root.append(trainingCard(sg[0],true));
   root.append(checkSec());
@@ -731,6 +790,7 @@ function renderTraining(){
     h("p",{class:"muted tiny"},"RPE geht vor Pace. Nach einem 5-km-Test („5 km Test in 24:30“) rechne ich die Zonen neu.")));
   const open=OPEN.has("plan");
   root.append(sec("Dein Plan (Leitlinie)",h("button",{class:"link",onclick:()=>{open?OPEN.delete("plan"):OPEN.add("plan");render()}},open?"Zuklappen":"Anzeigen"),open?planTable():h("p",{class:"muted tiny"},"41 Wochen bis zum 100er. Die Vorschläge richten sich danach, passen sich aber an das an, was du wirklich trainierst.")));
+  root.append(gapSec());
 }
 function logForm(){
   const F=LOGFORM||(LOGFORM={type:"run"});
