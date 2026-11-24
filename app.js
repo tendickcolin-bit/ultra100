@@ -31,7 +31,12 @@ S.days??={};S.custom??=[];S.learn??={};S.settings??=freshState().settings;S.sett
 for(const d of SUPP_DEFAULT)if(!S.settings.supps.find(s=>s.id===d.id))S.settings.supps.push({...d,active:!d.optional});
 if(!S.settings.mig6){for(const s of S.settings.supps){const d=SUPP_DEFAULT.find(x=>x.id===s.id);if(!d)continue;if(["d3","k2","evoo"].includes(s.id)){s.active=true;if(s.id==="d3")s.dose=d.dose}s.nut=d.nut;s.food=d.food;s.fac=d.fac;s.al=d.al;s.name=d.name;s.unit=d.unit}S.settings.mig6=true}
 let saveT=null;
-function save(){clearTimeout(saveT);saveT=setTimeout(()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast("Speichern fehlgeschlagen: Speicher voll?")}},150)}
+/* Änderungszeit je Tag merken, damit der Sync Tage zusammenführen kann */
+let HASH={};function stamp(){const now=Date.now();for(const[k,d]of Object.entries(S.days)){const{u,...rest}=d;const j=JSON.stringify(rest);if(HASH[k]!==undefined&&HASH[k]!==j)d.u=now;HASH[k]=j}
+  const st=JSON.stringify([S.settings,S.custom.length,Object.keys(S.learn||{}).length].map((x,i)=>i?x:{...x,u:0}));if(HASH._s!==undefined&&HASH._s!==st)S.settings.u=now;HASH._s=st;
+  for(const k of Object.keys(S.days))if(HASH[k]===undefined)HASH[k]=JSON.stringify((({u,...r})=>r)(S.days[k]))}
+function rehash(){HASH={};stamp()}
+function save(){clearTimeout(saveT);saveT=setTimeout(()=>{try{for(const k of Object.keys(S.days))if(HASH[k]===undefined){HASH[k]=dayWeight(S.days[k])?"":JSON.stringify((({u,...r})=>r)(S.days[k]));}stamp();localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast("Speichern fehlgeschlagen: Speicher voll?")}syncSoon()},150)}
 function day(ds){const d=S.days[ds]||(S.days[ds]={});d.entries??=[];d.workouts??=[];d.check??={};d.supps??={};return d}
 const hasDay=ds=>!!S.days[ds];
 function foodById(id){return FOODS[id]||S.custom.find(c=>c.id===id)||null}
@@ -1058,6 +1063,49 @@ function renderLongevity(){
   root.append(lon);
 }
 
+
+/* ================= Sync über ein geheimes GitHub-Gist (kostenlos) ================= */
+const SKEY="ultra100.sync";let SY={};try{SY=JSON.parse(localStorage.getItem(SKEY))||{}}catch(e){SY={}}
+const saveSY=()=>{try{localStorage.setItem(SKEY,JSON.stringify(SY))}catch(e){}};
+let syncT=null,SYNCING=false,SYNCMSG="";
+function syncSoon(){if(!SY.token)return;clearTimeout(syncT);syncT=setTimeout(()=>syncNow(false),4000)}
+async function gh(path,opt={}){const r=await fetch("https://api.github.com"+path,{...opt,headers:{Authorization:"Bearer "+SY.token,Accept:"application/vnd.github+json","Content-Type":"application/json",...(opt.headers||{})},cache:"no-store"});
+  if(r.status===401)throw new Error("Token ungültig oder abgelaufen");if(r.status===403||r.status===404&&path==="/gists")throw new Error("Token hat keine Gist-Berechtigung");if(!r.ok)throw new Error("GitHub antwortet mit "+r.status);return r.json()}
+const dayWeight=d=>(d.entries||[]).length+(d.workouts||[]).length+Object.keys(d.check||{}).length;
+function mergeState(L,R){
+  const out={...L,days:{...L.days}};
+  for(const[k,rd]of Object.entries(R.days||{})){const ld=out.days[k];if(!ld){out.days[k]=rd;continue}
+    const lu=ld.u||0,ru=rd.u||0;if(ru>lu||(ru===lu&&dayWeight(rd)>dayWeight(ld)))out.days[k]=rd}
+  const ids=new Set(out.custom.map(c=>c.id));out.custom=[...out.custom,...(R.custom||[]).filter(c=>!ids.has(c.id))];
+  out.learn={...(R.learn||{}),...(L.learn||{})};
+  if((R.settings&&R.settings.u||0)>(L.settings.u||0))out.settings={...L.settings,...R.settings};
+  return out}
+async function syncNow(manual){
+  if(!SY.token||SYNCING)return;SYNCING=true;SYNCMSG="Synchronisiere …";if(VIEW==="mehr")render();
+  try{
+    if(!SY.gist){const list=await gh("/gists?per_page=100");const g=list.find(x=>x.description==="ultra100-sync"&&x.files["ultra100.json"]);
+      if(g)SY.gist=g.id;else{const c=await gh("/gists",{method:"POST",body:JSON.stringify({description:"ultra100-sync",public:false,files:{"ultra100.json":{content:JSON.stringify(S)}}})});SY.gist=c.id}saveSY()}
+    const g=await gh("/gists/"+SY.gist);const f=g.files["ultra100.json"];let R=null;
+    if(f){let txt=f.content;if(f.truncated)txt=await (await fetch(f.raw_url,{cache:"no-store"})).text();try{R=JSON.parse(txt)}catch(e){R=null}}
+    const before=JSON.stringify(S);
+    if(R&&R.days){S=mergeState(S,R);S.days??={};S.custom??=[];S.learn??={};rehash();localStorage.setItem(KEY,JSON.stringify(S))}
+    const mine=JSON.stringify(S);
+    if(!R||mine!==JSON.stringify(mergeState(R,S)))await gh("/gists/"+SY.gist,{method:"PATCH",body:JSON.stringify({files:{"ultra100.json":{content:mine}}})});
+    SY.last=Date.now();saveSY();SYNCMSG="";if(manual)toast("Synchronisiert");
+    if(mine!==before)render();else if(VIEW==="mehr")render();
+  }catch(e){SYNCMSG="Sync-Fehler: "+e.message;if(manual)toast(SYNCMSG)}finally{SYNCING=false}}
+function syncSec(){
+  const on=!!SY.token;const t=h("input",{type:"password",placeholder:"ghp_…",autocomplete:"off",value:""});
+  const when=SY.last?new Date(SY.last).toLocaleString("de-DE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"noch nie";
+  return sec("Sync zwischen Geräten",on?h("span",{class:"pill good"},"an"):h("span",{class:"pill warn"},"aus"),
+    on?h("div",{},h("p",{class:"small"},"Zuletzt synchronisiert: "+when+(SYNCMSG?" · ":""),SYNCMSG?h("span",{class:SYNCMSG.startsWith("Sync-Fehler")?"warn-t":"muted"},SYNCMSG):null),
+        h("div",{class:"btn-row"},h("button",{class:"btn",onclick:()=>syncNow(true)},"Jetzt synchronisieren"),h("button",{class:"btn",onclick:()=>{SY={};saveSY();toast("Sync auf diesem Gerät aus");render()}},"Sync ausschalten")),
+        h("p",{class:"muted tiny"},"Synchronisiert automatisch beim Öffnen und ein paar Sekunden nach jeder Änderung. Gleicher Tag auf zwei Geräten gleichzeitig geändert: die neuere Änderung gewinnt."))
+      :h("div",{},h("p",{class:"small"},"Kostenlos über dein GitHub-Konto. Deine Daten liegen dann in einem geheimen Gist (nicht öffentlich gelistet, aber jeder mit dem genauen Link könnte es lesen)."),
+        h("ol",{class:"list small"},h("li",{},"Öffne ",h("a",{href:"https://github.com/settings/tokens/new?scopes=gist&description=Ultra100%20Sync",target:"_blank",rel:"noopener"},"diesen Link")," (GitHub, eingeloggt)."),
+          h("li",{},"Bei „Expiration“ „No expiration“ wählen, nur „gist“ ist angehakt, unten „Generate token“."),h("li",{},"Den Token (ghp_…) kopieren, hier einfügen, „Verbinden“."),h("li",{},"Auf dem zweiten Gerät denselben Token einfügen. Fertig.")),
+        h("label",{},"Token",t),h("button",{class:"btn primary wide",onclick:async()=>{const v=t.value.trim();if(!/^(ghp_|github_pat_)/.test(v)){toast("Das sieht nicht nach einem GitHub-Token aus");return}SY={token:v};saveSY();await syncNow(true);if(SYNCMSG.startsWith("Sync-Fehler")){toast(SYNCMSG);SY={};saveSY()}render()}},"Verbinden")))}
+
 /* ---------- Mehr / Einstellungen ---------- */
 function renderMehr(){
   const root=$("#v-mehr");root.replaceChildren();
@@ -1069,7 +1117,8 @@ function renderMehr(){
   S.settings.supps.forEach(s=>{const i=h("input",{type:"number",inputmode:"decimal",value:s.dose,"aria-label":"Dosis"});i.onchange=()=>{s.dose=+i.value.replace(",",".")||0;save()};
     sl.append(h("div",{class:"supp-r"},h("label",{class:"inline"},h("input",{type:"checkbox",checked:s.active?true:null,onchange:e=>{s.active=e.target.checked;save()}}),s.name),i,h("span",{class:"muted tiny"},s.unit)))});
   root.append(sec("Meine Supplements",null,sl,h("p",{class:"muted tiny"},"Bei Magnesium und Zink zählt die Menge des reinen Minerals (steht auf der Packung als „davon Magnesium“). Die Dosis fließt in die Nährstoffe ein.")));
-  root.append(sec("Daten",null,h("p",{class:"muted small"},"Alles liegt nur auf diesem iPhone. Mach ab und zu ein Backup."),
+  root.append(syncSec());
+  root.append(sec("Daten",null,h("p",{class:"muted small"},SY.token?"Zusätzlich zum Sync kannst du ein Backup als Datei sichern.":"Ohne Sync liegt alles nur auf diesem Gerät. Mach ab und zu ein Backup."),
     h("div",{class:"btn-row"},h("button",{class:"btn",onclick:exportData},"Backup exportieren"),h("button",{class:"btn",onclick:()=>$("#impF").click()},"Backup laden")),
     h("button",{class:"link danger",onclick:()=>{const b=$("#delC");b.hidden=!b.hidden}},"Alle Daten löschen …"),
     h("div",{id:"delC",hidden:true,class:"small"},"Wirklich alles löschen? ",h("button",{class:"btn danger",onclick:()=>{S=freshState();save();toast("Gelöscht");setView("training")}},"Ja, löschen"))));
@@ -1089,6 +1138,8 @@ $("#dTitle").onclick=()=>{CUR=todayISO();render()};
 $("#settingsBtn").onclick=()=>setView("mehr");
 $("#pkClose").onclick=()=>$("#picker").close();
 $("#impF").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const j=JSON.parse(await f.text());if(!j.days)throw 0;S=j;save();toast("Backup geladen");render()}catch(x){toast("Datei ist kein gültiges Backup")}e.target.value=""};
-document.addEventListener("visibilitychange",()=>{if(!document.hidden&&CUR!==todayISO()&&CUR===addDays(todayISO(),-1)){CUR=todayISO();render()}});
+document.addEventListener("visibilitychange",()=>{if(document.hidden)return;if(CUR!==todayISO()&&CUR===addDays(todayISO(),-1)){CUR=todayISO();render()}syncNow(false)});
+rehash();
 render();
+syncNow(false);
 if("serviceWorker" in navigator&&location.protocol==="https:")navigator.serviceWorker.register("sw.js").catch(()=>{});
