@@ -113,6 +113,11 @@ label.inline input{width:20px;height:20px}
 .exf,.exf-h{display:grid;grid-template-columns:minmax(0,1fr) 52px 52px 64px;gap:6px;align-items:center;padding:4px 0}
 .exf input{padding:7px 6px;text-align:center}
 .supp-r{display:grid;grid-template-columns:minmax(0,1fr) 80px 60px;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.done-list{display:flex;flex-direction:column}
+.done-i{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:15px;font-weight:550}
+.done-i:first-child{border-top:0}
+.pr{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:15px}
+.pr-v{text-align:right;font-weight:600;white-space:nowrap}
 .tbl{overflow-x:auto}
 table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
 th,td{text-align:left;padding:6px 5px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -125,7 +130,7 @@ tr.cur td{background:var(--soft);font-weight:600}
 .legend span{display:inline-flex;align-items:center;gap:5px}
 .legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
 .legend i.ln{height:3px}
-nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;background:rgba(255,255,255,.96);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;background:rgba(255,255,255,.96);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(3,1fr);padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
 nav.tabs button{background:none;border:0;padding:8px 0 7px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--muted)}
 nav.tabs button[aria-current="page"]{color:var(--ink);font-weight:600}
 nav.tabs svg{width:24px;height:24px}
@@ -148,17 +153,15 @@ dialog::backdrop{background:rgba(0,0,0,.25)}
     <button class="icon-btn" id="next" aria-label="Nächster Tag">›</button>
     <button class="icon-btn" id="settingsBtn" aria-label="Einstellungen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
   </header>
-  <main class="view" id="v-heute"></main>
-  <main class="view" id="v-essen" hidden></main>
-  <main class="view" id="v-training" hidden></main>
-  <main class="view" id="v-verlauf" hidden></main>
+  <main class="view" id="v-training"></main>
+  <main class="view" id="v-ernaehrung" hidden></main>
+  <main class="view" id="v-fortschritt" hidden></main>
   <main class="view" id="v-mehr" hidden></main>
 </div>
 <nav class="tabs" aria-label="Bereiche">
-  <button data-v="heute" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Heute</button>
-  <button data-v="essen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v8a2 2 0 0 0 2 2v8M5 3v5a2 2 0 0 0 2 2M9 3v5M17 3c-2 2-3 4-3 7h3v11"/></svg>Essen</button>
-  <button data-v="training"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="14" cy="4.5" r="2"/><path d="M9 21l2.5-6 3 2.5V21M6 12l3-4 4 1 2 3 3 1M11.5 15L9 9"/></svg>Training</button>
-  <button data-v="verlauf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V11M10 20V5M16 20v-6M22 20H2"/></svg>Verlauf</button>
+  <button data-v="training" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="14" cy="4.5" r="2"/><path d="M9 21l2.5-6 3 2.5V21M6 12l3-4 4 1 2 3 3 1M11.5 15L9 9"/></svg>Training</button>
+  <button data-v="ernaehrung"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v8a2 2 0 0 0 2 2v8M5 3v5a2 2 0 0 0 2 2M9 3v5M17 3c-2 2-3 4-3 7h3v11"/></svg>Ernährung</button>
+  <button data-v="fortschritt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>Fortschritt</button>
 </nav>
 <dialog id="picker"><div class="pk">
   <div class="pk-h"><input id="pkQ" type="search" placeholder="Lebensmittel suchen" autocomplete="off"><button class="btn" id="pkClose">Fertig</button></div>
