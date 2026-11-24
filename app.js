@@ -29,6 +29,7 @@ let S;
 try{S=JSON.parse(localStorage.getItem(KEY))||freshState()}catch(e){S=freshState()}
 S.days??={};S.custom??=[];S.learn??={};S.settings??=freshState().settings;S.settings.supps??=freshState().settings.supps;
 for(const d of SUPP_DEFAULT)if(!S.settings.supps.find(s=>s.id===d.id))S.settings.supps.push({...d,active:!d.optional});
+if(!S.settings.mig6){for(const s of S.settings.supps){const d=SUPP_DEFAULT.find(x=>x.id===s.id);if(!d)continue;if(["d3","k2","evoo"].includes(s.id)){s.active=true;if(s.id==="d3")s.dose=d.dose}s.nut=d.nut;s.food=d.food;s.fac=d.fac;s.al=d.al;s.name=d.name;s.unit=d.unit}S.settings.mig6=true}
 let saveT=null;
 function save(){clearTimeout(saveT);saveT=setTimeout(()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast("Speichern fehlgeschlagen: Speicher voll?")}},150)}
 function day(ds){const d=S.days[ds]||(S.days[ds]={});d.entries??=[];d.workouts??=[];d.check??={};d.supps??={};return d}
@@ -177,23 +178,22 @@ function targetsFor(ds){
   const gym=gymOf(ds).length>0||(sug&&sug.gym);const keyDay=(sug&&sug.kind==="key")||runsOf(ds).some(r=>(r.rpe||0)>=6);
   const other=d?d.workouts.filter(x=>x.type==="swim"||x.type==="bike"||x.type==="other").reduce((a,x)=>a+(x.min||0),0):0;
   let t;
+  // Basis: 3200 kcal, 200 g Protein, 400 g KH, ~90 g Fett. Trainingstage mehr KH.
+  const mk=(kcal,f,label)=>({kcal,p:200,f,c:Math.round((kcal-200*4-f*9)/4),label});
   if(p.race)t={kcal:7000,p:170,c:1100,f:110,label:"Renntag"};
-  else if(p.carbLoad){const c=Math.round(9*w);t={kcal:160*4+c*4+80*9,p:160,c,f:80,label:"Carb-Loading"}}
-  else if(longRun&&km>=35)t={kcal:6250,p:170,c:Math.round(9*w)+280,f:110,label:"Long Run 35–50 km"};
-  else if(longRun&&km>=20)t={kcal:4800,p:160,c:780,f:105,label:"Long Run 20–30 km"};
-  else if(keyDay&&gym)t={kcal:3800,p:160,c:575,f:95,label:"Schlüsseleinheit + Gym"};
-  else if(km>0)t={kcal:3600,p:160,c:525,f:95,label:"Lauftag"};
-  else t={kcal:3300,p:160,c:450,f:95,label:"Gym- oder Ruhetag"};
+  else if(p.carbLoad){const c=Math.round(9*w);t={kcal:200*4+c*4+80*9,p:200,c,f:80,label:"Carb-Loading"}}
+  else if(longRun&&km>=35)t=mk(6250,110,"Long Run 35–50 km");
+  else if(longRun&&km>=20)t=mk(4800,100,"Long Run 20–30 km");
+  else if(keyDay&&gym)t=mk(3800,90,"Schlüsseleinheit + Gym");
+  else if(km>0)t=mk(3500,90,"Lauftag");
+  else t=mk(3200,89,"Gym- oder Ruhetag");
   if(!p.race&&!p.carbLoad){
-    if(ds<"2026-12-07")t={kcal:2700,p:160,f:85,c:324,label:"Steigerung auf 2.700 kcal"};
-    else if(ds<"2026-12-21")t={kcal:3000,p:160,f:85,c:399,label:"Steigerung auf 3.000 kcal"};
-    else if(ds>="2027-06-01"){t.kcal-=200;t.c-=50}
-    if(km>12&&!(longRun&&km>=20)&&ds>="2026-12-21"){const add=Math.round((km-10)*w*0.9);t.kcal+=add;t.c+=Math.round(add/4)}
+    if(km>12&&!(longRun&&km>=20)){const add=Math.round((km-10)*w*0.9);t.kcal+=add;t.c+=Math.round(add/4)}
     if(other>=30){const add=Math.round(other*8);t.kcal+=add;t.c+=Math.round(add/4)}
   }
   return t;
 }
-function itemNut(it){const f=it.fid?foodById(it.fid):null;const per=f?f.n:it.n;if(!per)return NK.map(()=>0);return per.map(v=>(v||0)*(it.g||0)/100)}
+function itemNut(it){const f=it.fid?foodById(it.fid):null;const per=f?f.n:it.n;if(!per)return NK.map(()=>0);return NK.map((k,i)=>(per[i]||0)*(it.g||0)/100)}
 function itemFlags(it){if(it.fid){const f=foodById(it.fid);return f?f.fl||"":""}return it.fl||""}
 function itemName(it){if(it.fid){const f=foodById(it.fid);return f?f.name:it.fid}return it.name||"Lebensmittel"}
 function totals(ds){
@@ -202,7 +202,7 @@ function totals(ds){
   for(const e of d.entries){let ep=0;for(const it of e.items){const n=itemNut(it);NK.forEach((k,i)=>T[k]+=n[i]);ep+=n[NI.p];const fl=itemFlags(it);
     if(fl.includes("v"))T.veg+=it.g;if(fl.includes("s"))T.addSug+=n[NI.sug];if(fl.includes("x"))T.proc+=n[NI.kcal];if(fl.includes("a")){const f=foodById(it.fid);T.alc+=it.g/((f&&f.dr)||250)}}
     if(ep>=25)T.pMeals++}
-  for(const s of S.settings.supps){if(d.supps[s.id]&&s.nut){const amt=s.dose*(s.fac||1);T[s.nut]+=amt;if(s.nut==="mg")T.suppMg+=amt}}
+  for(const s of S.settings.supps){if(!d.supps[s.id])continue;if(s.food&&FOODS[s.food]){const g=s.dose*(s.fac||1);FOODS[s.food].n.forEach((v,i)=>T[NK[i]]+=(v||0)*g/100)}else if(s.nut){const amt=s.dose*(s.fac||1);T[s.nut]+=amt;if(s.nut==="mg")T.suppMg+=amt}}
   return T;
 }
 function workSum(ds){let km=0,min=0,hard=false,gym=0,walk=0,other=0;if(!hasDay(ds))return{km,min,hard,gym,walk,other};
@@ -251,10 +251,10 @@ function scores(ds){
 
 /* ================= Essensvorschläge ================= */
 function foodSuggestions(ds,T,tg,count=4){
-  const gaps={};const want=["p","fib","vA","vD","vE","vK","vC","b1","b2","b3","b6","b9","b12","cho","ca","mg","k","fe","zn","se","io","o3","ala"];
+  const gaps={};const want=["p","fib","vA","vD","vE","vK","vC","b1","b2","b3","b6","b9","b12","cho","ca","mg","k","fe","zn","se","io","o3","ala","poly","lut"];
   for(const k of want){const t=k==="p"?tg.p:NMETA[k].t;if(t&&T[k]<t)gaps[k]=t-T[k]}
   const kcalLeft=tg.kcal-T.kcal;const picked=[];const g={...gaps};
-  const cands=FOOD_LIST.filter(f=>!/[sxal]/.test(f.fl)&&!["salz","tee","kaffee","oel","rapsoel","leinoel","butter","whey","leber","zucker","honig","sportdrink","gel","proteinriegel"].includes(f.id));
+  const cands=FOOD_LIST.filter(f=>!/[sxal]/.test(f.fl)&&!["salz","tee","kaffee","oel","rapsoel","leinoel","butter","whey","leber","zucker","honig","sportdrink","gel","proteinriegel","kresse","nori","hefeflocken","kakaopulver","evoo","kokosoel","ghee","huehnerleber","austern","goji","knoblauch","ingwer","chili1"].includes(f.id));
   for(let r=0;r<count;r++){
     let best=null,bv=0;
     for(const f of cands){if(picked.some(p=>p.f.id===f.id))continue;
@@ -307,7 +307,7 @@ function gramsFor(f,num,unit,text,side){
 const esc=x=>x.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
 const EX_RE=new RegExp("(^|[^a-zäöüß])("+EX_ALIAS.map(a=>esc(a[0])).join("|")+")(?:e|n|en|s)?(?=[^a-zäöüß]|$)","g");
 const EX_MAP=Object.fromEntries(EX_ALIAS);
-const EQ=[[/\b(?:e\s?-?\s?z|s\s?-?\s?z)(?:\s?-?\s?(?:stange|hantel|curl\w*))?\b|\bezstange\b|\bszstange\b/,"SZ-Stange"],[/\b(?:kurzhantel\w*|kh|dumbbells?)\b/,"Kurzhantel"],[/\b(?:langhantel\w*|lh|barbell)\b/,"Langhantel"],[/\b(?:kabel\w*|cable|seilzug|seil)\b/,"Kabel"],[/\b(?:maschine|gerät|machine)\b/,"Maschine"],[/\b(?:multipresse|smith)\b/,"Multipresse"],[/\b(?:kettlebell|kugelhantel)\b/,"Kettlebell"],[/\b(?:widerstandsband|theraband|band)\b/,"Band"]];
+const EQ=[[/\b(?:e\s?-?\s?z|s\s?-?\s?z|easy\s?-?\s?bar|easybar|isi\s?bar)(?:\s?-?\s?(?:stange|hantel|bar|curl\w*))?\b|\bezstange\b|\bszstange\b/,"SZ-Stange"],[/\b(?:kurzhantel\w*|kh|dumbbells?)\b/,"Kurzhantel"],[/\b(?:langhantel\w*|lh|barbell)\b/,"Langhantel"],[/\b(?:kabel\w*|cable|seilzug|seil)\b/,"Kabel"],[/\b(?:maschine|gerät|machine)\b/,"Maschine"],[/\b(?:multipresse|smith)\b/,"Multipresse"],[/\b(?:kettlebell|kugelhantel)\b/,"Kettlebell"],[/\b(?:widerstandsband|theraband|band)\b/,"Band"]];
 const GYMW=/(\d\s*(?:x|×|\*|mal)\s*\d|\b(?:sätze|satz|wdh|wiederholung\w*|reps?|kg|kilo|supersatz|superset|pro seite|pro hand|je seite|körpergewicht|eigengewicht|versagen|rir|rpe|aufwärmsatz|aufwärmsätze|warm ?up)\b)/;
 const SEP=/[.;!?\n]+|,(?!\s*\d)|\b(?:und dann|dann noch|danach|anschließend|als nächstes|zum schluss|zum abschluss|außerdem)\b/;
 function parseSets(r){
@@ -350,7 +350,7 @@ function parseGym(t,fallbackSess){
   const clauses=t.split(SEP).map(x=>(x||"").trim()).filter(Boolean);
   const ex=[],rest=[];let last=null,grp=0;
   for(const c of clauses){
-    const ms=[...c.matchAll(EX_RE)].map(m=>({i:m.index+m[1].length,a:m[2]}));
+    const ms=[...c.matchAll(EX_RE)].map(m=>({i:m.index+m[1].length,a:m[2],e:m.index+m[0].length})).filter((m,k,arr)=>!(k>0&&/^[\s-]*$/.test(c.slice(arr[k-1].e,m.i))));
     if(!ms.length){
       const data=c.replace(/\d+(?:\.\d+)?/g," ").replace(GYMW,"").replace(new RegExp(GYMW.source,"g"),"").replace(/\b(?:noch|mit|à|a|je|und|von|zu|bei|ich|habe|hab|dann|wieder|nochmal|weitere?)\b/g,"").replace(/[^a-zäöüß]/g,"");
       if(last&&GYMW.test(c)&&data.length<3){const add=parseSets(c);if(add.sets&&last.sets){const rl=[...(last.repList||Array(last.sets).fill(last.reps)),...(add.repList||Array(add.sets).fill(add.reps))];last.sets+=add.sets;if(rl.every(x=>x!=null)&&new Set(rl).size>1){last.repList=rl}if(add.kg!=null&&last.kg==null)last.kg=add.kg}else Object.assign(last,Object.fromEntries(Object.entries(add).filter(([k,v])=>last[k]==null)));continue}
@@ -703,7 +703,7 @@ function renderErnaehrung(){
     [["Energie",T.kcal,tg.kcal,"kcal"],["Protein",T.p,tg.p,"g"],["Kohlenhydrate",T.c,tg.c,"g"],["Fett",T.f,tg.f,"g"],["Ballaststoffe",T.fib,38,"g"]].map(([l,v,t,u])=>h("div",{class:"nr"},h("span",{},l),h("span",{class:"num muted"},fmt(v)+" / "+fmt(t)+" "+u),bar(v,t),h("span",{class:"num pct"},fmt(Math.min(v/t*100,999))+" %"))),
     h("div",{class:"nr"},h("span",{},"Zugesetzter Zucker"),h("span",{class:"num muted"},fmt(T.addSug)+" g, Ziel < 50 g"),h("span",{}),h("span",{})),
     h("div",{class:"nr"},h("span",{},"Gesättigte Fette"),h("span",{class:"num muted"},fmt(T.sfa)+" g, Ziel < "+fmt(tg.kcal*0.1/9)+" g"),h("span",{}),h("span",{})));
-  root.append(sec("Alle Nährstoffe",h("span",{class:"muted tiny"},"Ziele: DGE/EFSA, Mann 18 J."),m,grp("Vitamine","v"),grp("Mineralstoffe","n"),grp("Fettsäuren","o"),
+  root.append(sec("Alle Nährstoffe",h("span",{class:"muted tiny"},"Ziele: optimal, unter den Obergrenzen"),m,grp("Vitamine","v"),grp("Mineralstoffe","n"),grp("Fettsäuren","o"),grp("Pflanzenstoffe & Kreatin","x"),
     h("p",{class:"muted tiny"},"Nährwerte sind Durchschnittswerte, keine Laborwerte. Jod und Biotin sind in den meisten Tabellen lückenhaft, beim Jod hilft Jodsalz. Rot heißt über der sicheren Obergrenze.")));
 }
 
@@ -865,16 +865,17 @@ function renderFortschritt(){
 /* ================= Longevity ================= */
 const c01=v=>Math.max(0,Math.min(1,v));
 const linS=(v,t)=>c01(v/t),invS=(v,ok,bad)=>v<=ok?1:v>=bad?0:1-(v-ok)/(bad-ok);
-const GRP={greens:["spinat","gruenkohl","salat","brokkoli"],berries:["beeren"],nuts:["mandeln","walnuss","nuesse","paranuss","nussmus","kuerbisk"],fish:["lachs","thunfisch","hering","fisch","garnelen","fischst"],
-  legume:["linsen","kichererb","bohnen","erbsen","hummus","tofu","tempeh","falafel"],red:{hack:1,rind:1,schwein:1,bolognese:.35,chili:.3,gyros:1,frikadelle:.8,burger:.5,doener:.4,leber:1,lasagne:.15},proc:{salami:1,schinken:1,bratwurst:1,leberkaese:1}};
+const GRP={greens:["spinat","spinat1","mangold","rucola","feldsalat","romana","kresse","gruenkohl","salat","brokkoli","brokkoli1","rosenkohl","weisskohl","rotkohl","pakchoi","chicoree"],berries:["beeren","erdbeere","himbeere","heidelbeere","brombeere","johannisb","kirsche","stachelb","cranberry","goji"],nuts:["mandeln","mandel1","cashew","haselnuss","pistazien","macadamia","pinien","walnuss","nuesse","erdnuss","paranuss","nussmus","kuerbisk","kuerbiskerne","sonnenbl","sesam","hanfsamen","leinsamen","chia"],fish:["lachs","raeucherlachs","thunfisch","thunfrisch","hering","hering1","makrele","sardinen","forelle","fisch","kabeljau","pangasius","garnelen","muscheln","austern","tintenfisch","fischst"],
+  ferm:["sauerkraut","sauerkr1","kefir","joghurt","grjoghurt","skyr","tempeh"],coffee:["kaffee","gruentee","schwtee"],
+  legume:["linsen","rotelinsen","kichererb","bohnen","kidney","weissebohnen","schwarzebohnen","sojabohnen","edamame","erbsen","erbsen1","hummus","tofu","tempeh","falafel"],red:{hack:1,rind:1,rinderfilet:1,kalb:1,lamm:1,wild:1,schweinefilet:1,schwein:1,bolognese:.35,chili:.3,gyros:1,frikadelle:.8,burger:.5,doener:.4,leber:1,lasagne:.15},proc:{salami:1,schinken:1,bratwurst:1,leberkaese:1,schweinebauch:1,raeucherlachs:0}};
 function longData(end){
   const keys=Object.keys(S.days).filter(k=>k<=end).sort();const first=keys[0]||end;
   const n=Math.max(1,Math.min(28,Math.round((parseD(end)-parseD(first))/864e5)+1));const ds=[];for(let i=n-1;i>=0;i--)ds.push(addDays(end,-i));
   const fed=ds.filter(d=>hasDay(d)&&day(d).entries.length);const wk=n/7;
   const avg=f=>fed.length?fed.reduce((s,d)=>s+f(totals(d)),0)/fed.length:null;
-  const serv={greens:0,berries:0,nuts:0,fish:0,legume:0},meat={red:0,proc:0};
+  const serv={greens:0,berries:0,nuts:0,fish:0,legume:0,ferm:0,coffee:0},meat={red:0,proc:0};
   for(const d of fed)for(const e of day(d).entries)for(const it of e.items){const id=it.fid&&(foodById(it.fid)||{}).gen||it.fid;if(!id)continue;
-    for(const g in serv)if(GRP[g].includes(id)&&it.g>=(g==="nuts"?15:40))serv[g]++;
+    for(const g in serv)if(GRP[g].includes(id)&&it.g>=(g==="nuts"?15:g==="coffee"?120:40))serv[g]++;
     if(GRP.red[id])meat.red+=it.g*GRP.red[id];if(GRP.proc[id])meat.proc+=it.g*GRP.proc[id]}
   let act=0,str=0;for(const d of ds){if(!hasDay(d))continue;for(const w of day(d).workouts){if(w.type==="gym"){str++;act+=w.min||60}else act+=w.min||0}}
   const chk=k=>{const v=ds.map(d=>hasDay(d)?day(d).check[k]:null).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null};
@@ -884,7 +885,7 @@ function longData(end){
     fib:avg(T=>T.fib),veg:avg(T=>T.veg),sug:avg(T=>T.addSug),sfa:avg(T=>T.kcal?T.sfa*9/T.kcal*100:0),na:avg(T=>T.na),k:avg(T=>T.k),o3:avg(T=>T.o3),
     ca:avg(T=>T.ca),vD:avg(T=>T.vD),vK:avg(T=>T.vK),mg:avg(T=>T.mg),b12:avg(T=>T.b12),b9:avg(T=>T.b9),prot:avg(T=>T.p/w),upf:avg(T=>T.kcal?T.proc/T.kcal:0),
     alc:fed.length?fed.reduce((s,d)=>s+totals(d).alc,0)/wk:null,cover:avg(T=>micro.reduce((s,x)=>s+ratio(T[x[0]],x[3]),0)/micro.length),
-    greens:serv.greens/wk,berries:serv.berries/wk,nuts:serv.nuts/wk,fish:serv.fish/wk,legume:serv.legume/wk,red:fed.length?meat.red/fed.length:null,proc:fed.length?meat.proc/fed.length:null}}
+    ferm:serv.ferm/wk,coffee:fed.length?serv.coffee/fed.length:null,vC:avg(T=>T.vC),vE:avg(T=>T.vE),zn:avg(T=>T.zn),se:avg(T=>T.se),poly:avg(T=>T.poly),lut:avg(T=>T.lut),greens:serv.greens/wk,berries:serv.berries/wk,nuts:serv.nuts/wk,fish:serv.fish/wk,legume:serv.legume/wk,red:fed.length?meat.red/fed.length:null,proc:fed.length?meat.proc/fed.length:null}}
 function longFactors(D){const F={},food=D.fedN>=3,add=(id,label,ok,score,val,goal)=>{if(ok)F[id]={label,s:score(),val:val(),goal}};
   add("act","Bewegung",true,()=>linS(D.act,300),()=>fmt(D.act)+" min/Woche","Ziel 150–300+ min");
   add("str","Krafttraining",true,()=>linS(D.str,2),()=>fmt(D.str,1)+"× pro Woche","Ziel 2×+");
@@ -913,18 +914,44 @@ function longFactors(D){const F={},food=D.fedN>=3,add=(id,label,ok,score,val,goa
   add("b12","Vitamin B12",food,()=>linS(D.b12,4),()=>fmt(D.b12,1)+" µg/Tag","4 µg");
   add("b9","Folat",food,()=>linS(D.b9,300),()=>fmt(D.b9)+" µg/Tag","300 µg");
   add("prot","Protein",food,()=>linS(D.prot,1.6),()=>fmt(D.prot,1)+" g/kg","1,6 g/kg");
+  add("ferm","Fermentiertes (Joghurt, Kefir, Sauerkraut)",food,()=>linS(D.ferm,5),()=>fmt(D.ferm,1)+"× pro Woche","5×+");
+  add("coffee","Kaffee / Tee",food,()=>D.coffee<=0.3?0.5:D.coffee<=5?1:0.7,()=>fmt(D.coffee,1)+" Tassen/Tag","1–4 Tassen");
+  add("poly","Polyphenole",food,()=>linS(D.poly,1000),()=>fmt(D.poly)+" mg/Tag","1000 mg");
+  add("lut","Lutein + Zeaxanthin",food,()=>linS(D.lut,6000),()=>fmt(D.lut/1000,1)+" mg/Tag","6 mg");
+  add("vC","Vitamin C",food,()=>linS(D.vC,200),()=>fmt(D.vC)+" mg/Tag","200 mg");
+  add("vE","Vitamin E",food,()=>linS(D.vE,20),()=>fmt(D.vE,1)+" mg/Tag","20 mg");
+  add("zn","Zink",food,()=>linS(D.zn,14),()=>fmt(D.zn,1)+" mg/Tag","14 mg");
+  add("se","Selen",food,()=>linS(D.se,100),()=>fmt(D.se)+" µg/Tag","100 µg");
   return F}
 const DISEASES=[
- {id:"cvd",name:"Herz & Kreislauf",sub:"Herzinfarkt, Schlaganfall, Bluthochdruck",w:{act:3,sleep:1,bmi:1.5,rhr:1,fib:1.5,veg:1.5,legume:.5,nuts:1,o3:1,sfa:1,salt:1.5,k:1,alc:1,proc:1,upf:.5},
+ {id:"cvd",name:"Herz & Kreislauf",sub:"Herzinfarkt, Schlaganfall, Bluthochdruck",w:{act:3,sleep:1,bmi:1.5,rhr:1,fib:1.5,veg:1.5,legume:.5,nuts:1,o3:1,sfa:1,salt:1.5,k:1,alc:1,proc:1,upf:.5,poly:.5},
   not:"Blutdruck, Cholesterin, Rauchen und Familie fließen nicht ein."},
  {id:"t2d",name:"Typ-2-Diabetes",sub:"Insulinresistenz, Stoffwechsel",w:{act:2.5,str:1.5,bmi:2.5,fib:1.5,sug:1.5,proc:1,red:.5,upf:1,legume:.5,nuts:.5,mg:.5,sleep:1,alc:.5},
   not:"Blutzucker, HbA1c und Familie fließen nicht ein."},
- {id:"cancer",name:"Krebs",sub:"v. a. Darm, Leber, Speiseröhre, Prostata",w:{act:1.5,bmi:1.5,alc:2.5,proc:2,red:1,fib:1.5,veg:1.5,legume:.5,upf:1,sug:.5,ca:.5,vD:.5},
+ {id:"cancer",name:"Krebs",sub:"v. a. Darm, Leber, Speiseröhre, Prostata",w:{act:1.5,bmi:1.5,alc:2.5,proc:2,red:1,fib:1.5,veg:1.5,legume:.5,upf:1,sug:.5,ca:.5,vD:.5,poly:.5},
   not:"Rauchen, Sonnenschutz, Impfungen (HPV, Hepatitis B), Gene und Vorsorge fließen nicht ein."},
- {id:"dem",name:"Alzheimer & Demenz",sub:"Gehirn, Gedächtnis",w:{act:2.5,sleep:1.5,greens:1,berries:1,nuts:.5,o3:1,legume:.5,alc:1,sfa:.5,b12:.5,b9:.5,salt:.5,bmi:.5,proc:.5,rhr:.5},
+ {id:"dem",name:"Alzheimer & Demenz",sub:"Gehirn, Gedächtnis",w:{act:2.5,sleep:1.5,greens:1,berries:1,nuts:.5,o3:1,legume:.5,alc:1,sfa:.5,b12:.5,b9:.5,salt:.5,bmi:.5,proc:.5,rhr:.5,poly:.5,lut:.5},
   not:"Hören, Bildung, soziale Kontakte, Blutdruck, Kopfverletzungen und Gene (APOE) fließen nicht ein."},
  {id:"bone",name:"Knochen & Muskeln",sub:"Osteoporose, Muskelschwund im Alter",w:{str:2.5,act:1,ca:1.5,vD:1.5,prot:1.5,vK:.5,mg:.5,k:.5,alc:.5,bmi:.5},
   not:"Knochendichte, Hormone und Gene fließen nicht ein."},
+ {id:"bp",name:"Bluthochdruck",sub:"Gefäße, Herz, Nieren",w:{salt:2.5,k:2,act:2,bmi:2,alc:1.5,veg:1,fib:.5,mg:.5,rhr:1,sleep:.5,poly:.5},
+  not:"Deinen gemessenen Blutdruck kennt die App nicht. Miss ihn ab und zu, Ziel unter 120/80."},
+ {id:"dep",name:"Depression",sub:"Stimmung, psychische Gesundheit",w:{act:2.5,sleep:2,o3:1,veg:1,fib:.5,upf:1,alc:1,sug:.5,legume:.5,nuts:.5,b9:.5,b12:.5,vD:.5,ferm:.5},
+  not:"Soziale Kontakte, Stress, Sinn und Gene fließen nicht ein. Wenn es dir länger schlecht geht, sprich mit jemandem oder einem Arzt."},
+ {id:"park",name:"Parkinson",sub:"Nervensystem, Bewegung",w:{act:3,berries:1,poly:1,coffee:1,veg:.5,o3:.5},
+  not:"Gene, Pestizide und Kopfverletzungen fließen nicht ein."},
+ {id:"eye",name:"Augen (Makuladegeneration)",sub:"Netzhaut, Sehkraft im Alter",w:{lut:2.5,o3:1.5,zn:1,vC:1,vE:1,greens:1,veg:1,bmi:.5},
+  not:"Rauchen, UV-Licht (Sonnenbrille) und Gene fließen nicht ein."},
+ {id:"gout",name:"Gicht & Nierensteine",sub:"Harnsäure, Gelenke",w:{alc:2,sug:2,red:1,bmi:1.5,act:.5,veg:.5,k:.5,vC:.5},
+  not:"Trinkmenge und Harnsäure-Blutwert fließen nicht ein. Trink genug, vor allem bei langen Läufen."},
+ {id:"arth",name:"Arthrose & Gelenke",sub:"Knie, Hüfte, Knorpel",w:{bmi:2.5,str:2,act:1,o3:1,vD:.5,vK:.5,poly:.5},
+  not:"Verletzungen und Gene fließen nicht ein. Laufen schadet gesunden Knien nach heutigem Wissen nicht."},
+ {id:"kidney",name:"Chronische Nierenerkrankung",sub:"Nierenfunktion",w:{salt:2,bmi:1.5,act:1.5,sug:1,alc:.5,veg:1,upf:1,rhr:.5},
+  not:"Blutdruck, Blutzucker und Schmerzmittel (Ibuprofen bei Läufen!) fließen nicht ein."},
+ {id:"imm",name:"Infekte & Immunsystem",sub:"Abwehrkräfte",w:{sleep:2.5,vD:1.5,zn:1,vC:1,prot:1,act:1,veg:1,alc:.5,se:.5,ferm:.5},
+  not:"Impfungen und Hygiene fließen nicht ein. Sehr lange Läufe schwächen die Abwehr kurzzeitig."},
+ {id:"gut",name:"Darm & Divertikel",sub:"Verdauung, Darmflora",w:{fib:2.5,veg:1.5,legume:1,ferm:1,poly:.5,red:1,proc:1,act:1,upf:.5},
+  not:"Vorsorge (Darmspiegelung) und Gene fließen nicht ein."},
  {id:"liver",name:"Fettleber",sub:"Leber, Stoffwechsel",w:{bmi:2,act:2,sug:2,alc:2,upf:1,fib:.5,o3:.5},
   not:"Leberwerte und Medikamente fließen nicht ein."}];
 function diseaseScore(d,F){let sw=0,ss=0,tot=0;const parts=[];for(const[k,w]of Object.entries(d.w)){tot+=w;if(!F[k])continue;sw+=w;ss+=w*F[k].s;parts.push({k,w,...F[k],gap:w*(1-F[k].s)})}
@@ -962,7 +989,7 @@ function renderLongevity(){
     if(L.hrv!=null)lon.append(progRow("HRV",fmt(L.hrv)+" ms",delta(L.hrv,P.hrv,"ms"),"höher ist besser, steigt mit Ausdauer und Schlaf"));
     if(L.rhr!=null)lon.append(progRow("Ruhepuls",fmt(L.rhr),delta(L.rhr,P.rhr,"",0,true),"sinkt, wenn die Ausdauer wächst"));
     lon.append(progRow("Vitamine & Mineralstoffe",fmt(L.cover)+" %",delta(L.cover,P.cover,"%"),"Ø Abdeckung der Tagesziele"));
-    lon.append(progRow("Ballaststoffe",fmt(L.fib)+" g",delta(L.fib,P.fib,"g"),"Ziel 38 g"));
+    lon.append(progRow("Ballaststoffe",fmt(L.fib)+" g",delta(L.fib,P.fib,"g"),"Ziel 45 g"));
     lon.append(progRow("Obst & Gemüse",fmt(L.veg)+" g",delta(L.veg,P.veg,"g"),"Ziel 500 g"));
     lon.append(progRow("Omega-3 pro Woche",fmt(L.o3w,1)+" g",delta(L.o3w,P.o3w,"g",1),"Ziel ≈ 1,75 g EPA+DHA (1–2× Fisch)"));
     lon.append(progRow("Aktive Tage",fmt(L.move)+" %",delta(L.move,P.move,"%")));
