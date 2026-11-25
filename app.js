@@ -749,23 +749,48 @@ function wEditor(w,changed){
 function addUnitRow(onAdd){return h("div",{class:"add-unit"},h("span",{class:"small"},"+ Einheit hinzufügen:"),h("div",{class:"chips"},WTYPES.map(([t,l])=>h("button",{class:"chip",onclick:()=>onAdd(t==="gym"?{type:"gym",session:(suggest(CUR,1)[0].gym||{id:"push"}).id,ex:[{name:""}],min:60}:{type:t,rpe:4})},l))))}
 function cleanW(w){if(w.ex)w.ex=w.ex.filter(e=>e.name&&e.name.trim());if(w.type==="run"&&w.km&&!w.min)w.min=Math.round(w.km*6.8);if(w.type==="run"&&w.min&&!w.km)w.km=Math.round(w.min/6.8*10)/10;return w}
 
-/* ---------- Heute noch zu wenig ---------- */
-let EXAMPLES=null;
-function exampleFor(k){
-  if(!EXAMPLES){EXAMPLES={};const skip=new Set(["salz","tee","kaffee","whey","zucker","honig","sportdrink","gel","proteinriegel","hefeflocken","nori","leber","huehnerleber","austern","kokosoel","ghee","butter","oel","rapsoel","leinoel","evoo","kresse","knoblauch","ingwer","goji"]);
-    const c=FOOD_LIST.filter(f=>!/[sxa]/.test(f.fl)&&!skip.has(f.id));
-    for(const n of NUTR){const i=NI[n[0]];if(!n[3])continue;const best=c.map(f=>({f,v:(f.n[i]||0)*(f.p||f.u||100)/100})).sort((a,b)=>b.v-a.v).slice(0,2).filter(x=>x.v>0);
-      EXAMPLES[n[0]]=best.map(x=>x.f.name.split(/ \/ | \(/)[0])}
-    EXAMPLES.p=["Hähnchenbrust","Skyr"];EXAMPLES.fib=["Linsen","Haferflocken"]}
-  return(EXAMPLES[k]||[]).join(", ")}
+/* ---------- Heute noch zu wenig: eine Kombination, die möglichst alles abdeckt ---------- */
+const COMBO_SKIP=new Set(["salz","tee","kaffee","whey","zucker","honig","sportdrink","gel","proteinriegel","hefeflocken","nori","leber","huehnerleber","austern","kokosoel","ghee","butter","oel","rapsoel","leinoel","evoo","kresse","knoblauch","ingwer","goji","chili1","kakaopulver"]);
+function portionOf(f){return f.id==="paranuss"?10:Math.min(f.p||f.u||100,(f.u||100)>=100?(f.u||100):(f.u||100)*2,300)}
+/* Gierige Mengenüberdeckung: nimmt nacheinander das Lebensmittel, das von den noch offenen Lücken
+   am meisten schließt (jede Lücke zählt höchstens 1×), bis alles gedeckt ist oder max Lebensmittel. */
+function comboFor(rows,kcalLeft,max=4){
+  const gap={};for(const x of rows)gap[x.k]=x.t-x.v;
+  const cands=FOOD_LIST.filter(f=>!/[sxal]/.test(f.fl)&&!COMBO_SKIP.has(f.id));
+  const picked=[];const g={...gap};let kc=0;
+  for(let r=0;r<max&&Object.keys(g).length;r++){
+    let best=null,bv=0;
+    for(const f of cands){if(picked.some(p=>p.f.id===f.id))continue;
+      const portion=portionOf(f),fk=f.n[0]*portion/100;let v=0;const hits=[];
+      for(const k in g){const amt=(f.n[NI[k]]||0)*portion/100;if(amt<=0)continue;const c=Math.min(1,amt/g[k]);v+=c;if(c>=0.25||amt>=0.15*gap[k])hits.push([k,c])}
+      const room=kcalLeft-kc;if(fk>Math.max(room,250))v-=(fk-Math.max(room,250))/500;
+      if(v>bv){bv=v;best={f,portion,kc:fk,hits}}}
+    if(!best||bv<0.35)break;best.hits=best.hits.sort((a,b)=>b[1]-a[1]).map(x=>x[0]);picked.push(best);kc+=best.kc;
+    for(const k in g){g[k]-=(best.f.n[NI[k]]||0)*best.portion/100;if(g[k]<=gap[k]*0.1)delete g[k]}}
+  const add={};for(const k in gap)add[k]=picked.reduce((a,p)=>a+(p.f.n[NI[k]]||0)*p.portion/100,0);
+  return{picked,add,kc}}
 function gapSec(){
   const T=totals(CUR),tg=targetsFor(CUR);
-  const rows=[["p","Protein",T.p,tg.p,"g",0],["fib","Ballaststoffe",T.fib,NMETA.fib.t,"g",0],...NUTR.filter(n=>"vnox".includes(n[5])&&n[3]>0&&n[0]!=="na").map(n=>[n[0],n[1],T[n[0]],n[3],n[2],n[6]])]
+  const all=NUTR.filter(n=>"vnox".includes(n[5])&&n[3]>0&&n[0]!=="na"&&n[0]!=="cr");
+  const rows=[["p","Protein",T.p,tg.p,"g",0],["fib","Ballaststoffe",T.fib,NMETA.fib.t,"g",0],...all.map(n=>[n[0],n[1],T[n[0]],n[3],n[2],n[6]])]
     .map(([k,l,v,t,u,d])=>({k,l,v,t,u,d,r:t?v/t:1})).filter(x=>x.r<1).sort((a,b)=>a.r-b.r);
   if(!rows.length)return sec("Nährstoffe heute",null,h("p",{class:"small ok-t"},"Alles gedeckt."));
-  return sec("Heute noch zu wenig",h("span",{class:"muted tiny"},rows.length+" von "+(NUTR.filter(n=>"vnox".includes(n[5])&&n[3]>0&&n[0]!=="na").length+2)),
-    h("ul",{class:"gap"},rows.map(x=>{const ex=exampleFor(x.k);return h("li",{},h("span",{},h("b",{},x.l),ex?" ("+ex+")":""),h("span",{class:"num"},fmt(Math.min(x.r*100,99))+" %"))})),
-    h("p",{class:"muted tiny"},"In Klammern: Lebensmittel mit besonders viel davon pro Portion."))}
+  const C=comboFor(rows,tg.kcal-T.kcal);
+  const after=x=>(x.v+(C.add[x.k]||0))/x.t;
+  const full=rows.filter(x=>after(x)>=0.9),rest=rows.filter(x=>after(x)<0.9);
+  const nm=k=>{const r=rows.find(x=>x.k===k);return r?r.l.replace(/ \(.*\)/,"").replace(/ Thiamin| Riboflavin| Niacin| Pantothens\./,""):k};
+  const s=sec("Heute noch zu wenig",h("span",{class:"muted tiny"},rows.length+" von "+(all.length+2)+" Nährstoffen"));
+  s.append(h("div",{class:"gap-tags"},rows.map(x=>h("span",{class:"gtag"},x.l.replace(/ \(.*\)/,"")+" "+fmt(Math.min(x.r*100,99))+" %"))));
+  if(C.picked.length){
+    s.append(h("div",{class:"tiny muted up",style:"margin-top:12px"},"Diese "+C.picked.length+" Lebensmittel zusammen"));
+    for(const p of C.picked)s.append(h("div",{class:"sug-r"},
+      h("div",{},h("div",{},fmt(p.portion)+" g "+p.f.name),h("div",{class:"muted tiny"},(p.hits.length?p.hits.slice(0,5).map(nm).join(", ")+(p.hits.length>5?" + "+(p.hits.length-5)+" weitere":""):"rundet ab")+" · "+fmt(p.kc)+" kcal")),
+      h("button",{class:"add","aria-label":p.f.name+" eintragen",onclick:()=>{commit(CUR,{items:[{fid:p.f.id,g:p.portion}],workouts:[],check:{},supps:{},meal:guessMeal()});toast(p.f.name+" eingetragen");render()}},"+")));
+    s.append(h("div",{class:"combo-sum"},h("span",{class:"small"},h("b",{},full.length+" von "+rows.length)," Lücken danach (fast) gedeckt · "+fmt(C.kc)+" kcal"),
+      h("button",{class:"btn small-btn",onclick:()=>{commit(CUR,{items:C.picked.map(p=>({fid:p.f.id,g:p.portion})),workouts:[],check:{},supps:{},meal:guessMeal()});toast("Kombination eingetragen");render()}},"Alle eintragen")));
+    if(rest.length)s.append(h("p",{class:"muted tiny"},"Bleibt knapp: "+rest.map(x=>x.l.replace(/ \(.*\)/,"")+" ("+fmt(Math.min(after(x)*100,99))+" %)").join(", ")+(rest.some(x=>x.k==="vD")?". Vitamin D kommt vor allem aus Sonne und deinem D3.":"")+(rest.some(x=>x.k==="io")?" Jod: Jodsalz nutzen.":"")))}
+  s.append(h("p",{class:"muted tiny"},"Gesucht wird automatisch die kleinste Kombination aus normalen Portionen, die möglichst viele Lücken auf einmal schließt."));
+  return s}
 
 /* ---------- Training ---------- */
 function renderTraining(){
@@ -853,9 +878,98 @@ function longestRun(a,b){let m=0;for(let d=a;d<=b;d=addDays(d,1))for(const w of 
 function easyPaces(a,b){const p=[];for(let d=a;d<=b;d=addDays(d,1))for(const w of runsOf(d))if(w.km>=3&&w.min&&(w.rpe||4)<=4.5)p.push(w.min*60/w.km);p.sort((x,y)=>x-y);return p.length?p[Math.floor(p.length/2)]:null}
 function delta(a,b,unit,dec=0,invert=false){if(a==null||b==null||!isFinite(a)||!isFinite(b))return h("span",{class:"muted"},"");const d=a-b;if(Math.abs(d)<Math.pow(10,-dec)/2)return h("span",{class:"muted"},"gleich");const good=invert?d<0:d>0;return h("span",{class:good?"ok-t":"warn-t"},(d>0?"+":"−")+fmt(Math.abs(d),dec)+(unit?" "+unit:""))}
 function progRow(label,value,change,note){return h("div",{class:"pr"},h("div",{},h("div",{},label),note?h("div",{class:"muted tiny"},note):null),h("div",{class:"num pr-v"},h("div",{},value),change?h("div",{class:"tiny"},change):null))}
+/* ================= Ultra-Bereitschaft & Verletzungsrisiko (Schätzung, lokal berechnet) ================= */
+/* Muskelgruppen je Übung: beine, waden (Waden/Fuß/Schienbein), huefte (Hüft- und Beckenstabilität), core (Rumpf). */
+const MG_RULES=[
+  [/kniebeuge|squat|kreuzheben|deadlift|rdl|beinpresse|beinstrecker|beinbeuger|ausfallschritt|lunge|hip thrust|step-up|hackenschmidt|nordic|good morning|glute ham|wall sit|thruster|clean|snatch|schlitten|box jump|kettlebell|pull through|reverse hyper|wall ball|sandsack|burpee/,"beine"],
+  [/waden|tibialis|calf|seilspringen|einbeinstand|box jump/,"waden"],
+  [/glute bridge|abduk|abduction|adduk|copenhagen|glute kickback|single-leg|einbein|bulgarian|split squat|step-up|cossack|pistol|ausfallschritt|hip thrust|einbeinstand/,"huefte"],
+  [/plank|crunch|sit-up|beinheben|russian twist|bauchroller|dead bug|pallof|farmers|suitcase|hollow|l-sit|dragon flag|toes to bar|woodchopper|scheibenwischer|mountain|bird dog|back extension|rückenstrecker|turkish|kreuzheben|deadlift|good morning|reverse hyper|landmine/,"core"]];
+const MG_NAMES={beine:"Beine",waden:"Waden & Füße",huefte:"Hüfte & Becken",core:"Rumpf & Core"};
+const MG_WEEK={beine:8,waden:4,huefte:4,core:6};// harte Sätze pro Woche, die Läufer schützen
+const MG_TIP={beine:"Kniebeuge oder Rumänisches Kreuzheben",waden:"Wadenheben einbeinig, Tibialis Raises",huefte:"Bulgarian Split Squat, Copenhagen Plank, Glute Bridge",core:"Dead Bug, Side Plank, Back Extension"};
+function exGroups(name){const n=String(name||"").toLowerCase();return MG_RULES.filter(([re])=>re.test(n)).map(r=>r[1])}
+function gymSets(from,to){const s={beine:0,waden:0,huefte:0,core:0};
+  for(let d=from;d<=to;d=addDays(d,1))for(const w of gymOf(d)){
+    const ex=(w.ex&&w.ex.length)?w.ex:(GYM[w.session]?GYM[w.session].ex.map(e=>({name:e[0],sets:e[1]})):[]);
+    for(const e of ex){const n=e.sets||(e.repList?e.repList.length:3);for(const g of exGroups(e.name))s[g]+=n}}
+  return s}
+function strengthProtection(ds){const sets=gymSets(addDays(ds,-13),ds);const per={};let sum=0,wt=0;
+  const W={beine:1,waden:1.2,huefte:1.2,core:1};
+  for(const g in MG_WEEK){per[g]={sets:sets[g]/2,r:clamp(sets[g]/2/MG_WEEK[g],0,1)};sum+=W[g]*per[g].r;wt+=W[g]}
+  return{per,score:sum/wt}}
+function runStats(from,to){let km=0,runs=0,q=0,lr=0,b2b=0;
+  for(let d=from;d<=to;d=addDays(d,1)){const rs=runsOf(d);km+=kmOf(d);runs+=rs.length;q+=rs.filter(w=>(w.rpe||0)>=6||w.test).length;lr=Math.max(lr,...rs.map(w=>w.km||0),0);
+    if(dowOf(d)===6)b2b=Math.max(b2b,kmOf(d)+kmOf(addDays(d,-1)))}
+  return{km,runs,q,lr,b2b}}
+const READY_T={km:70,lr:50,b2b:58,runs:5,q:1};// Rennbereit: Ø 70 km/Woche, 50 km am Stück, 58 km Sa+So, 5 Läufe und 1 harte Einheit pro Woche
+function readyParts(v){return[
+  {id:"km",l:"Wochenkilometer",w:30,r:clamp(v.km/READY_T.km,0,1),txt:fmt(v.km,0)+" von "+READY_T.km+" km Ø pro Woche"},
+  {id:"lr",l:"Längster Lauf",w:30,r:clamp(v.lr/READY_T.lr,0,1),txt:fmt(v.lr,1)+" von "+READY_T.lr+" km (6 Wochen)"},
+  {id:"b2b",l:"Wochenende Sa + So",w:10,r:clamp(v.b2b/READY_T.b2b,0,1),txt:fmt(v.b2b,1)+" von "+READY_T.b2b+" km an einem Wochenende (6 Wochen)"},
+  {id:"runs",l:"Regelmäßigkeit",w:10,r:clamp(v.runs/READY_T.runs,0,1),txt:fmt(v.runs,1)+" von "+READY_T.runs+" Läufen pro Woche"},
+  {id:"q",l:"Tempo, Intervalle, Berg",w:10,r:clamp(v.q/READY_T.q,0,1),txt:fmt(v.q,1)+" harte Einheit(en) pro Woche"},
+  {id:"kraft",l:"Kraft Beine/Rumpf",w:10,r:clamp(v.kraft,0,1),txt:fmt(v.kraft*100)+" % vom Soll an Beine, Waden, Hüfte, Core"}]}
+function ultraReadiness(ds){const a=runStats(addDays(ds,-27),ds),b=runStats(addDays(ds,-41),ds);
+  const v={km:a.km/4,lr:b.lr,b2b:b.b2b,runs:a.runs/4,q:a.q/4,kraft:strengthProtection(ds).score};
+  const parts=readyParts(v);return{parts,score:Math.round(parts.reduce((s,p)=>s+p.w*p.r,0))}}
+function planReadiness(ds){const p=planFor(ds);if(p.pre)return 0;const wk=p.post?40:Math.min(40,p.wk);
+  const rows=[];for(let w=Math.max(1,wk-3);w<=wk;w++)rows.push(PLAN[w-1]);const rows6=[];for(let w=Math.max(1,wk-5);w<=wk;w++)rows6.push(PLAN[w-1]);
+  const avg=f=>rows.reduce((s,r)=>s+f(r),0)/rows.length;
+  const v={km:avg(r=>r[6]),lr:Math.max(...rows6.map(r=>r[4])),b2b:Math.max(...rows6.map(r=>r[4]+r[5])),runs:avg(r=>[r[1],r[2],r[3],r[4],r[5]].filter(x=>x>0).length),
+    q:avg(r=>/^GA/.test(r[0])?0:1)+avg(r=>/ · Do: /.test(r[0])?1:0),kraft:1};
+  return Math.round(readyParts(v).reduce((s,x)=>s+x.w*x.r,0))}
+function ring(pct,mark){const NS="http://www.w3.org/2000/svg",s=document.createElementNS(NS,"svg"),R=52,C=2*Math.PI*R;s.setAttribute("viewBox","0 0 128 128");s.setAttribute("class","ring");
+  const add=(t,a,txt)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(txt!=null)e.textContent=txt;s.append(e);return e};
+  add("circle",{cx:64,cy:64,r:R,fill:"none",stroke:"var(--line)","stroke-width":12});
+  add("circle",{cx:64,cy:64,r:R,fill:"none",stroke:"var(--accent)","stroke-width":12,"stroke-linecap":"round","stroke-dasharray":(C*clamp(pct,0,100)/100).toFixed(1)+" "+C.toFixed(1),transform:"rotate(-90 64 64)"});
+  if(mark!=null){const a=(mark/100)*2*Math.PI-Math.PI/2;add("line",{x1:64+(R-9)*Math.cos(a),y1:64+(R-9)*Math.sin(a),x2:64+(R+9)*Math.cos(a),y2:64+(R+9)*Math.sin(a),stroke:"var(--ink)","stroke-width":2.5,"stroke-linecap":"round"})}
+  add("text",{x:64,y:66,"text-anchor":"middle",class:"ring-v"},pct+" %");add("text",{x:64,y:84,"text-anchor":"middle",class:"ring-l"},"bereit");return s}
+function readySec(ds){const R=ultraReadiness(ds),soll=planReadiness(ds),diff=R.score-soll;
+  const status=diff>=-5?["ok-t",diff>8?"Vor dem Plan":"Auf Kurs"]:diff>=-15?["warn-t","Etwas hinter dem Plan"]:["warn-t","Deutlich hinter dem Plan"];
+  const weakest=R.parts.slice().sort((a,b)=>(a.r-1)*a.w-(b.r-1)*b.w)[0];
+  const s=sec("Ultra-Bereitschaft",h("span",{class:"muted tiny"},"Schätzung"));
+  s.append(h("div",{class:"ring-wrap"},ring(R.score,soll),h("div",{},
+    h("div",{class:status[0],style:"font-weight:600"},status[1]),
+    h("div",{class:"small muted"},"Laut Plan wärst du jetzt bei etwa "+soll+" % (Strich am Ring)."),
+    h("div",{class:"small muted",style:"margin-top:6px"},"100 % heißt: Umfang wie in den Peak-Wochen vor dem Rennen. Am meisten bringt dir gerade: "+weakest.l+"."))));
+  const open=OPEN.has("readyD");
+  s.append(h("button",{class:"link",onclick:()=>{open?OPEN.delete("readyD"):OPEN.add("readyD");render()}},open?"Details ausblenden":"Woraus sich das zusammensetzt"));
+  if(open)for(const p of R.parts)s.append(h("div",{class:"rd"},h("div",{class:"rd-h"},h("span",{},p.l),h("span",{class:"num muted tiny"},fmt(p.r*p.w,0)+"/"+p.w)),bar(p.r,1),h("div",{class:"muted tiny"},p.txt)));
+  return s}
+function injuryRisk(ds){const why=[];let pts=0;
+  const acute=kmRange(addDays(ds,-6),ds),chronic=kmRange(addDays(ds,-27),ds)/4;let acwr=null;
+  if(chronic>=8){acwr=acute/chronic;const l=acwr<=1.2?0:acwr<=1.5?(acwr-1.2)/0.3*0.6:clamp(0.6+(acwr-1.5)/0.5*0.4,0,1);pts+=35*l;
+    if(acwr>1.3)why.push("Diese Woche "+fmt(acute,0)+" km, das ist "+fmt(acwr,1)+"× dein Schnitt der letzten 4 Wochen ("+fmt(chronic,0)+" km). Mehr als etwa 1,3× erhöht das Risiko.")}
+  else if(acute>25){pts+=15;why.push("Viele Kilometer ohne längere Vorgeschichte in der App: langsam steigern.")}
+  const lr7=longestRun(addDays(ds,-6),ds),lrPrev=longestRun(addDays(ds,-34),addDays(ds,-7));
+  if(lrPrev>0&&lr7>lrPrev*1.3&&lr7-lrPrev>=5){pts+=10;why.push("Längster Lauf ("+fmt(lr7,1)+" km) ist viel länger als zuletzt ("+fmt(lrPrev,1)+" km).")}
+  const SP=strengthProtection(ds);pts+=35*(1-SP.score);
+  const weak=Object.entries(SP.per).filter(([g,x])=>x.r<0.6).map(([g])=>g);
+  if(weak.length)why.push("Zu wenig Kraft für "+weak.map(g=>MG_NAMES[g]).join(", ")+" (letzte 14 Tage).");
+  let active=0,hard=0;for(let i=0;i<7;i++){const d=addDays(ds,-i);if(hasDay(d)&&day(d).workouts.some(w=>w.type!=="walk"))active++;if(isHardDay(d))hard++}
+  if(active>=7){pts+=7;why.push("Kein Ruhetag in den letzten 7 Tagen.")}if(hard>=4){pts+=5;why.push(hard+" harte Tage in einer Woche.")}
+  let knee=0,limp=false;for(let i=0;i<3;i++){const d=addDays(ds,-i);if(!hasDay(d))continue;const c=day(d).check;knee=Math.max(knee,c.knee||0);if((c.flags||[]).includes("hinken"))limp=true}
+  if(limp||knee>=5){pts=Math.max(pts,75);why.unshift(limp?"Du hast Hinken eingetragen: erst auskurieren.":"Knie-Schmerz "+knee+"/10 in den letzten Tagen.")}
+  else if(knee>=3){pts+=8;why.push("Knie meldet sich ("+knee+"/10).")}
+  const score=Math.round(clamp(pts,0,100));
+  return{score,level:score<35?["good","niedrig"]:score<60?["warn","mittel"]:["bad","erhöht"],why,SP,acwr,acute,chronic}}
+function riskSec(ds){const I=injuryRisk(ds);
+  const s=sec("Verletzungsrisiko",h("span",{class:"pill "+I.level[0]},I.level[1]));
+  s.append(h("div",{class:"risk"},h("i",{style:"left:"+I.score+"%"})),h("div",{class:"risk-l tiny muted"},h("span",{},"niedrig"),h("span",{},"mittel"),h("span",{},"erhöht")));
+  s.append(h("div",{class:"tiny muted up",style:"margin-top:12px"},"Krafttraining für Läufer (Sätze pro Woche, Ø 14 Tage)"));
+  for(const[g,x]of Object.entries(I.SP.per))s.append(h("div",{class:"mrow mg"},h("span",{},MG_NAMES[g]),bar(x.sets,MG_WEEK[g],"",false),h("span",{class:"num muted"},fmt(x.sets,0)+" / "+MG_WEEK[g])));
+  if(I.acwr!=null)s.append(h("div",{class:"small muted",style:"margin-top:6px"},"Laufbelastung: "+fmt(I.acute,0)+" km in 7 Tagen, Ø "+fmt(I.chronic,0)+" km/Woche davor ("+fmt(I.acwr,2)+"×, ideal 0,8–1,3×)."));
+  if(I.why.length)s.append(h("ul",{class:"list"},I.why.map(w=>h("li",{class:"small"},w))));
+  else s.append(h("p",{class:"small ok-t"},"Belastung und Krafttraining passen gerade gut zusammen."));
+  const weak=Object.entries(I.SP.per).filter(([g,x])=>x.r<1).sort((a,b)=>a[1].r-b[1].r).slice(0,2);
+  if(weak.length)s.append(h("p",{class:"small"},"Diese Woche noch: "+weak.map(([g,x])=>Math.ceil(MG_WEEK[g]-x.sets)+" Sätze "+MG_NAMES[g]+" ("+MG_TIP[g]+")").join("; ")+"."));
+  s.append(h("p",{class:"muted tiny"},"Schätzung aus deinen Einträgen, keine Diagnose. Die App ordnet jede Übung automatisch Beinen, Waden, Hüfte oder Core zu. Bei Schmerzen zählt dein Körper, nicht die Zahl."));
+  return s}
 function renderFortschritt(){
   const root=$("#v-fortschritt");root.replaceChildren();
   const today=CUR,p=planFor(today);
+  root.append(readySec(today),riskSec(today));
   // Langfristig: Ziel 100 km
   const MS=[["2027-04-03",32,"32 km Meilenstein"],["2027-07-10",42,"Marathon im Training"],["2027-07-31",50,"Generalprobe 50 km"],[RACE,100,"100 km Solo"]];
   const next=MS.find(m=>m[0]>=today)||MS[3];
