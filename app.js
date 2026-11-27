@@ -440,16 +440,20 @@ function parseText(raw,ds){
     let sess=null;for(const[re,s]of SESSION_RE)if(re.test(seg)){sess=s;break}
     if((sess||/(\bgym\b|fitnessstudio|krafttraining|\bstudio\b|pumpen|trainiert)/.test(seg))&&!findFood(seg)){if(out.workouts.some(w=>w.type==="gym"))continue;const s=sess||(sug.gym&&sug.gym.id)||"push";if(!out.workouts.find(w=>w.type==="gym"&&w.session===s))out.workouts.push({type:"gym",session:s,ex:[],min:60});lastGym=s;continue}
     const parts=[];seg.split(/\bmit\b/).forEach((piece,i)=>piece.split(/\s+(?=\d)/).forEach((pp,j)=>parts.push({s:pp.trim(),side:i>0&&j===0})));
+    let lastIt=null;
     for(let i=0;i<parts.length;i++){const pt=parts[i];if(!pt.s)continue;let f=findFood(pt.s);
+      if(!f&&lastIt&&!/[a-zäöüß]{3,}/.test(pt.s.replace(UNIT_RE,"").replace(/pct[\d.]+/g,"").replace(FILLER,""))){const um2=pt.s.match(UNIT_RE);
+        if(um2&&um2[1]){const lf=foodById(lastIt.fid);if(lf)lastIt.g=gramsFor(lf,+um2[1],um2[2]||null,pt.s,false);else{lastIt.num=+um2[1];lastIt.unit=um2[2]||null;lastIt.g=/^(g|gr|gramm|ml|milliliter)$/.test(um2[2]||"")?+um2[1]:/^(kg|kilo|l|liter)$/.test(um2[2]||"")?+um2[1]*1000:lastIt.g}}lastIt=null;continue}
       if(!f&&i+1<parts.length&&!/[a-zäöüß]{3,}/.test(pt.s.replace(UNIT_RE,"").replace(/pct[\d.]+/g,"").replace(FILLER,""))){parts[i+1].s=pt.s+" "+parts[i+1].s;continue}
       const pct=+((pt.s.match(/pct([\d.]+)/)||[])[1]||0),brand=brandIn(pt.s),um=pt.s.replace(/pct[\d.]+/g," ").match(UNIT_RE);
       const q=searchText(pt.s);
-      if(!f){if(q.replace(/pct[\d.]+/g,"").trim().length>=3)out.items.push({name:cap(q.replace(/pct([\d.]+)/g,"$1 %")),g:um&&/^(g|gr|gramm|ml|milliliter)$/.test(um[2]||"")?+um[1]:um&&/^(kg|kilo|l|liter)$/.test(um[2]||"")?+um[1]*1000:100,num:um?+um[1]:null,unit:um?um[2]||null:null,n:NK.map(()=>0),look:true,q,brand,pct});continue}
+      if(!f){if(q.replace(/pct[\d.]+/g,"").trim().length>=3){out.items.push({name:cap(q.replace(/pct([\d.]+)/g,"$1 %")),g:um&&/^(g|gr|gramm|ml|milliliter)$/.test(um[2]||"")?+um[1]:um&&/^(kg|kilo|l|liter)$/.test(um[2]||"")?+um[1]*1000:100,num:um?+um[1]:null,unit:um?um[2]||null:null,n:NK.map(()=>0),look:true,q,brand,pct});lastIt=um?null:out.items.at(-1)}continue}
       if(f.raw&&/\b(roh|ungekocht|trocken)\b/.test(pt.s+" "+seg))f=FOODS[f.raw];
       if(f.id==="schoko"&&pct>=50)f=FOODS.zartbitter;
       const it={fid:f.id,g:gramsFor(f,um?+um[1]:null,um?um[2]:null,pt.s,pt.side)};
       if(brand||pct||S.learn[q]){it.q=q;it.brand=brand;it.pct=pct;it.gen=f.id}
-      out.items.push(it)}
+      else if(extraWords(q,f).length){it.q=q;it.gen=f.id;it.alt=true}
+      out.items.push(it);lastIt=um?null:it}
   }
   return out;
 }
@@ -541,7 +545,7 @@ function previewBox(){
   if(P.items.length){
     const ms=h("select",{"aria-label":"Mahlzeit"},h("option",{value:""},"Mahlzeit: automatisch"),MEALS.map(m=>h("option",{value:m,selected:P.meal===m?true:null},cap(m))));ms.onchange=()=>P.meal=ms.value||null;box.append(ms);
     P.items.forEach((it,i)=>{const nn=itemNut(it);const gi=h("input",{type:"number",inputmode:"numeric",value:it.g,"aria-label":"Gramm"});gi.onchange=()=>{it.g=Math.max(0,+gi.value||0);render()};
-      box.append(h("div",{class:"pv-row"},h("div",{},h("button",{class:"pv-name",onclick:()=>openPicker(f=>{it.fid=f.id;delete it.n;delete it.look;if(it.q){S.learn[it.q]=f.id;save()}render()})},itemName(it)),it.pending?h("div",{class:"tiny muted"},"Suche genaues Produkt …"):it.off?h("div",{class:"tiny muted"},"Produkt aus Open Food Facts"+(it.gen?" · fehlende Vitamine ergänzt":"")+" · ",h("button",{class:"link tiny",onclick:()=>{it.fid=it.gen||it.fid;it.off=false;if(it.q)delete S.learn[it.q];save();render()}},"allgemein nehmen")):it.offMiss?h("div",{class:"tiny muted"},"Genaues Produkt nicht gefunden, Durchschnittswerte"):null),gi,h("span",{class:"muted tiny num"},"g · "+fmt(nn[0])+" kcal"),h("button",{class:"x","aria-label":"Entfernen",onclick:()=>{P.items.splice(i,1);render()}},"×")))});
+      box.append(h("div",{class:"pv-row"},h("div",{},h("button",{class:"pv-name",onclick:()=>openPicker(f=>{it.fid=f.id;delete it.n;delete it.look;if(it.q){S.learn[it.q]=f.id;save()}render()})},itemName(it)),it.pending?h("div",{class:"tiny muted"},"Suche genaues Produkt …"):it.bls?h("div",{class:"tiny muted"},"BLS 4.0"+(foodById(it.fid)?.est?" · "+estTxt(foodById(it.fid))+" geschätzt":"")+(it.gen?" · ":""),it.gen?h("button",{class:"link tiny",onclick:()=>{it.fid=it.gen;it.bls=false;save();render()}},"allgemein nehmen"):null):it.off?h("div",{class:"tiny muted"},"Produkt aus Open Food Facts"+(it.gen?" · fehlende Vitamine ergänzt":"")+" · ",h("button",{class:"link tiny",onclick:()=>{it.fid=it.gen||it.fid;it.off=false;if(it.q)delete S.learn[it.q];save();render()}},"allgemein nehmen")):it.offMiss?h("div",{class:"tiny muted"},"Genaues Produkt nicht gefunden, Durchschnittswerte"):null),gi,h("span",{class:"muted tiny num"},"g · "+fmt(nn[0])+" kcal"),h("button",{class:"x","aria-label":"Entfernen",onclick:()=>{P.items.splice(i,1);render()}},"×")))});
     box.append(h("div",{class:"small num",style:"margin-top:6px"},fmt(n[0])+" kcal · "+fmt(n[1])+" g Protein · "+fmt(n[2])+" g KH · "+fmt(n[3])+" g Fett"));
   }
   if(P.where!=="training"||P.items.length)box.append(h("button",{class:"link",onclick:()=>openPicker(f=>{P.items.push({fid:f.id,g:f.p||f.u});render()})},"+ Lebensmittel hinzufügen"));
@@ -640,7 +644,7 @@ async function offSearch(q,brand,pct){
       if(c.length&&c[0].s>=need)return c[0].p}catch(e){if(e.name==="AbortError"||e instanceof TypeError)return"offline"}}
   return null}
 function offFood(p,gen){const f=offToFood({...p,product_name:p.product_name_de||p.product_name});
-  if(!gen)gen=findFood(normalize(f.name));
+  if(!gen){const b=BLS&&blsFind(searchText(normalize(p.product_name_de||p.product_name||"")));gen=b?blsFood(b):findFood(normalize(f.name))}
   if(gen){[NI.fib,...NK.map((k,i)=>i).filter(i=>i>=NI.vA)].forEach(i=>{if(!f.n[i])f.n[i]=gen.n[i]});f.fl=gen.fl||f.fl;f.gen=gen.id}
   if(+p.serving_quantity>0)f.u=+p.serving_quantity;else if(gen)f.u=gen.u;
   return f}
@@ -649,10 +653,14 @@ async function enrich(P){
   todo.forEach(it=>it.pending=true);if(PREVIEW===P)render();
   let offline=false;
   await Promise.all(todo.map(async it=>{
-    let f=S.learn[it.q]&&foodById(S.learn[it.q]);
-    if(!f){const p=await offSearch(it.q,it.brand,it.pct);if(p==="offline")offline=true;else if(p){f=offFood(p,it.gen&&FOODS[it.gen]);if(!S.custom.find(c=>c.id===f.id))S.custom.push(f);S.learn[it.q]=f.id;save()}}
+    let f=S.learn[it.q]&&foodById(S.learn[it.q]),src=f?(f.src==="bls"?"bls":/^off/.test(f.id)?"off":"own"):null;
+    if(!f&&!it.brand){await loadBLS();const b=blsFind(it.q,it.pct);if(b&&(!it.alt||blsBetter(b,it))){f=blsFood(b);src="bls"}}
+    if(!f&&!it.alt){const p=await offSearch(it.q,it.brand,it.pct);if(p==="offline")offline=true;else if(p){await loadBLS();f=offFood(p,it.gen&&FOODS[it.gen]);if(!S.custom.find(c=>c.id===f.id))S.custom.push(f);S.learn[it.q]=f.id;src="off";save()}}
+    if(!f&&it.look){await loadBLS();const b=blsFind(it.brand?it.q.replace(it.brand,""):it.q,0);if(b){f=blsFood(b);src="bls"}}
     it.pending=false;it.done=true;
-    if(f){if(it.look){it.g=it.num!=null?gramsFor(f,it.num,it.unit,it.q,false):f.u||100;delete it.name;delete it.n;delete it.look}it.fid=f.id;it.off=true}
+    if(f&&it.alt&&src!=="bls"){f=null}
+    if(f){if(it.look){it.g=it.num!=null?gramsFor(f,it.num,it.unit,it.q,false):f.u||100;delete it.name;delete it.n;delete it.look}it.fid=f.id;it.off=src==="off";it.bls=src==="bls"}
+    else if(it.alt){}
     else if(it.look){it.drop=true;P.unknown.push(it.name)}
     else it.offMiss=true}));
   P.items=P.items.filter(it=>!it.drop);
@@ -662,25 +670,155 @@ async function enrich(P){
 /* ---------- Lebensmittel-Auswahl (Suche, lokal + Open Food Facts) ---------- */
 function openPicker(onPick){
   const dlg=$("#picker");const q=$("#pkQ"),list=$("#pkList");q.value="";
-  const show=items=>{list.replaceChildren(...items.slice(0,40).map(f=>h("button",{class:"pk-i",onclick:()=>{dlg.close();onPick(f)}},h("span",{},f.name),h("span",{class:"muted tiny num"},fmt(f.n[0])+" kcal · "+fmt(f.n[1],1)+" g P /100 g"))))};
-  const filter=()=>{const s=q.value.trim().toLowerCase();if(!s)return show(allFoods().slice().sort((a,b)=>a.name.localeCompare(b.name,"de")));
-    show(allFoods().filter(f=>f.name.toLowerCase().includes(s)||f.al.some(a=>a.startsWith(s)||a.includes(s))))};
-  q.oninput=filter;filter();
+  const pick=f=>{dlg.close();onPick(f)};
+  const msg=t=>h("p",{class:"muted small pk-m"},t);
+  const kc=f=>fmt(f.n[0])+" kcal · "+fmt(f.n[1],1)+" g P /100 g";
+  const row=(f,sub,fn)=>h("button",{class:"pk-i",onclick:fn},h("span",{},f.name),h("span",{class:"muted tiny num"},sub));
+  const tag=f=>f.src==="bls"?" · BLS":f.src==="own"?" · eigenes":/^off/.test(f.id)?" · Produkt":"";
+  const byCode=async code=>{list.replaceChildren(msg("Suche Barcode "+code+" …"));const f=await foodByCode(code);if(f)return pick(f);
+    list.replaceChildren(msg("Produkt "+code+" ist nicht in Open Food Facts. Leg es mit den Werten von der Packung an."),ownFoodForm(pick,{code}))};
+  const filter=()=>{const s=q.value.trim().toLowerCase();
+    if(/^\d{8,14}$/.test(s))return list.replaceChildren(row({name:"Barcode "+s+" suchen"},"Open Food Facts",()=>byCode(s)));
+    if(!s)return list.replaceChildren(...allFoods().slice().sort((a,b)=>a.name.localeCompare(b.name,"de")).slice(0,60).map(f=>row(f,kc(f)+tag(f),()=>pick(f))));
+    const own=allFoods().filter(f=>f.name.toLowerCase().includes(s)||f.al.some(a=>a.startsWith(s)||a.includes(s))).slice(0,15);const seen=new Set(own.map(f=>f.id));
+    const bl=blsRank(s,{prefix:true,limit:45}).filter(x=>!seen.has(x.b.id)).slice(0,35);
+    if(!own.length&&!bl.length)return list.replaceChildren(msg(BLS?"Nichts gefunden. Scanne den Barcode, such online oder leg es selbst an.":"Datenbank lädt …"));
+    list.replaceChildren(...own.map(f=>row(f,kc(f)+tag(f),()=>pick(f))),...bl.map(({b})=>row(b,kc(b)+" · BLS",()=>pick(blsFood(b)))))};
+  q.oninput=filter;filter();if(!BLS)loadBLS().then(()=>{if(dlg.open)filter()});
+  $("#pkScan").onclick=async()=>{const code=await scanBarcode();if(code){q.value=code;byCode(code)}};
+  $("#pkOwn").onclick=()=>list.replaceChildren(ownFoodForm(pick,{name:q.value.trim()}));
   $("#pkOff").onclick=async()=>{const s=q.value.trim();if(s.length<2){q.focus();return}$("#pkOff").textContent="Suche läuft …";
     try{const ctl=new AbortController();setTimeout(()=>ctl.abort(),9000);
-      const r=await fetch("https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&action=process&json=1&page_size=15&fields=code,product_name,brands,nutriments&search_terms="+encodeURIComponent(s),{signal:ctl.signal});
-      const j=await r.json();const res=(j.products||[]).filter(p=>p.product_name&&p.nutriments&&p.nutriments["energy-kcal_100g"]!=null).map(offToFood);
-      if(!res.length)toast("Nichts gefunden");show(res.map(f=>({...f,_off:true})));
-      list.querySelectorAll(".pk-i").forEach((b,i)=>{b.onclick=()=>{const f=res[i];if(!S.custom.find(c=>c.id===f.id)){S.custom.push(f);save()}dlg.close();onPick(f)}});
-    }catch(e){toast("Online-Suche nicht erreichbar")}finally{$("#pkOff").textContent="Online suchen (Open Food Facts)"}};
+      const r=await fetch("https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&action=process&json=1&page_size=20&fields="+OFF_FIELDS+"&search_terms="+encodeURIComponent(s),{signal:ctl.signal});
+      const j=await r.json();const ps=(j.products||[]).filter(p=>(p.product_name_de||p.product_name)&&p.nutriments&&p.nutriments["energy-kcal_100g"]!=null);
+      if(!ps.length){toast("Nichts gefunden");return}
+      list.replaceChildren(...ps.map(p=>{const v=offToFood({...p,product_name:p.product_name_de||p.product_name});return row(v,kc(v)+" · Produkt",()=>{const f=offFood(p);const ex=S.custom.find(c=>c.id===f.id);if(!ex){S.custom.push(f);save()}pick(ex||f)})}));
+    }catch(e){toast("Online-Suche nicht erreichbar")}finally{$("#pkOff").textContent="Online suchen"}};
   dlg.showModal();setTimeout(()=>q.focus(),50);
 }
 function offToFood(p){const n=p.nutriments,g=k=>+n[k+"_100g"]||0;const v=NK.map(()=>0);
   v[NI.kcal]=g("energy-kcal");v[NI.p]=g("proteins");v[NI.c]=g("carbohydrates");v[NI.f]=g("fat");v[NI.fib]=g("fiber");v[NI.sug]=g("sugars");v[NI.sfa]=g("saturated-fat");
   v[NI.na]=g("sodium")*1000||g("salt")*400;v[NI.ca]=g("calcium")*1000;v[NI.fe]=g("iron")*1000;v[NI.mg]=g("magnesium")*1000;v[NI.k]=g("potassium")*1000;v[NI.zn]=g("zinc")*1000;v[NI.vC]=g("vitamin-c")*1000;v[NI.vD]=g("vitamin-d")*1e6;v[NI.b12]=g("vitamin-b12")*1e6;
+  for(const[k,o,f]of[["vA","vitamin-a",1e6],["vE","vitamin-e",1000],["vK","vitamin-k",1e6],["b1","vitamin-b1",1000],["b2","vitamin-b2",1000],["b3","vitamin-pp",1000],["b5","pantothenic-acid",1000],["b6","vitamin-b6",1000],["b7","biotin",1e6],["b9","vitamin-b9",1e6],["b9","folates",1e6],["ph","phosphorus",1000],["cu","copper",1000],["mn","manganese",1000],["se","selenium",1e6],["io","iodine",1e6],["ala","alpha-linolenic-acid",1],["cho","choline",1000]])if(!v[NI[k]]&&g(o))v[NI[k]]=g(o)*f;
+  if(g("eicosapentaenoic-acid")||g("docosahexaenoic-acid"))v[NI.o3]=g("eicosapentaenoic-acid")+g("docosahexaenoic-acid");
   const name=(p.product_name+(p.brands?" ("+p.brands.split(",")[0]+")":"")).slice(0,60);
   return{id:"off"+(p.code||uid()),name,al:[name.toLowerCase()],n:v,u:100,fl:(g("sugars")>20?"s":"")+"x"};
 }
+
+/* ---------- Bundeslebensmittelschlüssel 4.0 (Max Rubner-Institut, CC BY 4.0) ----------
+   bls.json: 7.140 Lebensmittel, je 100 g essbarer Anteil. Fehlende Werte (Selen, Cholin,
+   Pflanzenstoffe, Kreatin stehen nicht im BLS) werden aus dem ähnlichsten App-Lebensmittel geschätzt. */
+let BLS=null,BLSP=null;
+const fold=s=>String(s).toLowerCase().replace(/ä/g,"a").replace(/ö/g,"o").replace(/ü/g,"u").replace(/ß/g,"ss").replace(/ae/g,"a").replace(/oe/g,"o").replace(/ue/g,"u");
+const PREPW=new Set(["roh","gekocht","gegart","gebraten","gegrillt","gedunstet","gedampft","frittiert","gebacken","geroestet","gerostet","getrocknet","geschmort","tiefgefroren","konserve","pulver","instant","ungesusst","gesusst","zubereitet","uberbacken","geraucht"]);
+const COOKED=/\b(gegart|gekocht|gebraten|gegrillt|gedunstet|gedampft|geschmort)\b/;
+function loadBLS(){if(BLS)return Promise.resolve(BLS);
+  return BLSP||(BLSP=fetch("bls.json").then(r=>{if(!r.ok)throw 0;return r.json()}).then(j=>{const ix=j.k.map(k=>NI[k]??-1);
+    BLS=j.d.map(([code,name,v])=>{const n=NK.map(()=>0),miss=[];NK.forEach((k,i)=>{if(!j.k.includes(k))miss.push(i)});
+      v.forEach((x,i)=>{const t=ix[i];if(t<0)return;if(x==null)miss.push(t);else n[t]=x});
+      const fn=fold(name),w=fn.split(/[^a-z0-9]+/).filter(t=>t.length>1&&!/^\d+$/.test(t));return{id:"bls"+code,code,name,n,miss,fn,w,c:w.join("")}});
+    return BLS}).catch(()=>{BLSP=null;return null}))}
+const BLS_SYN={brezel:"laugengebäck",brezeln:"laugengebäck",laugenbrezel:"laugengebäck",hüttenkäse:"körniger frischkäse",cottage:"körniger frischkäse",kaiserschmarrn:"kaiserschmarren",nudeln:"teigwaren",pasta:"teigwaren",spaghetti:"teigwaren",hack:"hackfleisch",gehacktes:"hackfleisch",pommes:"pommes frites",semmel:"brötchen",schrippe:"brötchen",wecken:"brötchen",paradeiser:"tomate",erdäpfel:"kartoffel",topfen:"speisequark",quark:"speisequark",hendl:"hähnchen",huhn:"hähnchen",hühnchen:"hähnchen",pute:"pute",truthahn:"pute",obers:"sahne",rahm:"sahne",karotten:"karotte",möhren:"karotte",möhre:"karotte"};
+const NAMEIGN=new Set(["roh","reif","frisch","fett","mind","max","tr","bis","pasteurisiert","ultrahocherhitzt","ohne","pfanne","ofen","natur","ganzes","abgetropft","gegart","gekocht","gebraten","gegrillt","gedunstet","gedampft","geschmort","vorgegart","zubereitet","selbstgemacht"]);
+const INFL=/^(e|n|en|er|s|es|ern|nen|se|ns)$/;
+function blsWords(q){return fold(q.replace(/pct[\d.]+/g," ").replace(/[a-zäöüß]+/g,w=>BLS_SYN[w]||w)).split(/[^a-z0-9]+/).filter(w=>w.length>=3&&!/^\d/.test(w)&&!STOP.has(w))}
+/* Treffer eines Suchworts in den Wörtern eines BLS-Namens: [Punkte, abgedeckte Wörter] */
+function wordHit(w,T,pre){let best=0,cov=0;const set=(p,c)=>{if(p>best){best=p;cov=c}};
+  for(let i=0;i<T.length;i++){const t=T[i];
+    if(t===w){set(3,1);continue}
+    if(t.length>=3&&w.length>=3){
+      if(w.startsWith(t)){const r=w.slice(t.length);if(INFL.test(r))set(2.9,1);
+        else{const r2=r.replace(/^(er|en|es|e|s|n)/,"");for(let j=0;j<T.length;j++)if(j!==i&&r2.length>=3&&(T[j].startsWith(r2)||(T[j].length>=4&&r2.startsWith(T[j])))){set(2.8,2);break}
+          if(i+1<T.length&&(t+T[i+1]===w||INFL.test(w.slice((t+T[i+1]).length))&&w.startsWith(t+T[i+1])))set(2.9,2);
+          if(t.length>=4)set(1.4,1)}}
+      else if(t.startsWith(w)){const r=t.slice(w.length);set(INFL.test(r)?2.9:pre?2:1.7,1)}}}
+  if(!best&&w.length>=4&&T.join("").includes(w))set(1.3,1);
+  return[best,cov]}
+function blsScore(b,qw,prefix){let s=0,hit=0,cov=0;
+  qw.forEach((w,qi)=>{const[p,c]=wordHit(w,b.w,prefix&&qi===qw.length-1);
+    if(p){hit++;cov+=c;s+=p;if(qi===0&&(b.w[0]===w||(p>=2.8&&(w.startsWith(b.w[0])||b.w[0].startsWith(w)))))s+=1}else s-=2.5});
+  if(!hit)return{s:-99,hit};
+  const extra=b.w.filter(t=>!NAMEIGN.has(t)).length-cov;s-=0.55*Math.max(0,extra);const g=b.code[0];
+  if(!qw.some(w=>PREPW.has(w))){
+    if("FGH".includes(g)&&b.w.includes("roh"))s+=0.5;
+    if("UVTECK".includes(g)&&COOKED.test(b.fn))s+=0.4;
+    if(/\b(getrocknet|pulver|instantpulver|konserve|tiefgefroren|gesalzen|gezuckert|laktosefrei)\b/.test(b.fn))s-=0.6}
+  if("XY".includes(g))s-=0.6;
+  return{s,hit}}
+function blsRank(q,{prefix=false,pct=0,limit=40}={}){if(!BLS)return[];const qw=blsWords(q);if(!qw.length)return[];
+  const pc=pct?String(pct).replace(".",",")+" %":null;
+  return BLS.map(b=>{const r=blsScore(b,qw,prefix);if(pc&&b.fn.includes(pc))r.s+=2.5;return{b,...r,pc:!pc||b.fn.includes(pc)}})
+    .filter(x=>x.hit===qw.length||(qw.length>=3&&x.hit>=qw.length-1)).sort((a,b)=>b.s-a.s).slice(0,limit)}
+function blsFind(q,pct){const r=blsRank(q,{pct,limit:1})[0];if(!r||r.s<0.5)return null;if(pct&&!r.pc)return null;return r.b}
+/* Wörter der Eingabe, die das erkannte App-Lebensmittel nicht abdeckt (z. B. „paniert“, „Vollkorn“). */
+const GENERIC=new Set(["frisch","bio","natur","klein","gross","stuck","portion","scheibe","scheiben","glas","tasse","becher","dose","pct"]);
+function extraWords(q,f){const al=f.al.map(fold).concat(fold(f.name).split(/[^a-z0-9]+/));
+  return blsWords(q).filter(w=>!PREPW.has(w)&&!GENERIC.has(w)&&!al.some(a=>a&&(a===w||(a.length>=3&&w.startsWith(a)&&INFL.test(w.slice(a.length)))||(w.length>=4&&a.startsWith(w))||(a.length>=5&&a.includes(w)))))}
+function blsBetter(b,it){const g=FOODS[it.gen];return!g||extraWords(it.q,g).every(w=>b.w.some(t=>t===w||(w.length>=4&&(t.startsWith(w)||w.startsWith(t))))||b.c.includes(w))}
+/* Werte, die im BLS fehlen, aus dem ähnlichsten App-Lebensmittel schätzen (über die Energiedichte skaliert). */
+function fillMissing(f,miss,name){const gen=findFood(normalize(name));if(!gen)return null;
+  const sc=f.n[NI.kcal]>0&&gen.n[NI.kcal]>0?Math.min(3,Math.max(0.3,f.n[NI.kcal]/gen.n[NI.kcal])):1;const est=[];
+  for(const i of miss)if(gen.n[i]){f.n[i]=Math.round(gen.n[i]*sc*100)/100;est.push(NK[i])}
+  if(est.length)f.est=est;f.u=gen.u||f.u;return gen}
+function estTxt(f){const L={se:"Selen",cho:"Cholin",poly:"Polyphenole",lut:"Lutein",lyc:"Lycopin",cr:"Kreatin"};const e=(f.est||[]).map(k=>L[k]||NUTR[NI[k]][1]);return e.length>2?e.slice(0,2).join(", ")+" u. a.":e.join(", ")}
+function blsFlags(b){const g=b.code[0],n=b.fn;let fl="";
+  if((g==="G"&&!/suppe|pulver/.test(n))||(g==="F"&&!/saft|nektar|getrank|konfit|gezuckert|sirup/.test(n)))fl+="v";
+  if(g==="S"||(/\b(gesusst|gezuckert)\b/.test(n)&&!/ungesusst/.test(n)))fl+="s";
+  if("WSDR".includes(g)||/instant/.test(n))fl+="x";
+  if(g==="P")fl+="a";
+  if("NP".includes(g)||/saft|nektar|\bdrink\b|getrank|smoothie|bruhe|milch\b|vollmilch|magermilch|buttermilch|kefir|eistee|limonade/.test(n)&&!/kase|pulver|schokolade/.test(n))fl+="l";
+  return fl}
+function blsFood(b){const ex=foodById(b.id);if(ex)return ex;
+  const f={id:b.id,name:b.name,al:[],n:b.n.slice(),u:100,fl:blsFlags(b),src:"bls"};
+  if(f.fl.includes("l"))f.u=250;if(f.fl.includes("a"))f.dr=b.name.match(/bier/i)?500:b.name.match(/wein|sekt/i)?150:40;
+  fillMissing(f,b.miss,b.name);S.custom.push(f);save();return f}
+
+/* ---------- Barcode: Kamera (BarcodeDetector oder ZXing) + Open Food Facts ---------- */
+const OFF_FIELDS="code,product_name,product_name_de,generic_name_de,brands,nutriments,serving_quantity,quantity";
+function loadScript(src){return new Promise((ok,no)=>{if(window.ZXing)return ok();const s=h("script",{src});s.onload=ok;s.onerror=no;document.head.append(s)})}
+async function scanBarcode(){
+  const dlg=$("#scan"),vid=$("#scVid"),st=$("#scSt");let stream;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){toast("Kamera wird hier nicht unterstützt");return null}
+  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280}},audio:false})}catch(e){toast("Kein Kamerazugriff. In den Einstellungen erlauben.");return null}
+  vid.srcObject=stream;st.textContent="Barcode ins Bild halten …";dlg.showModal();try{await vid.play()}catch(e){}
+  return new Promise(res=>{let done=false;
+    const stop=code=>{if(done)return;done=true;stream.getTracks().forEach(t=>t.stop());vid.srcObject=null;if(dlg.open)dlg.close();res(code)};
+    $("#scClose").onclick=()=>stop(null);dlg.onclose=()=>stop(null);
+    const fmts=["ean_13","ean_8","upc_a","upc_e"];
+    const native=async()=>{try{if(!("BarcodeDetector" in window))return false;const ok=(await BarcodeDetector.getSupportedFormats()).some(f=>fmts.includes(f));if(!ok)return false;
+      const det=new BarcodeDetector({formats:fmts});const tick=async()=>{if(done)return;try{const r=await det.detect(vid);if(r[0])return stop(r[0].rawValue)}catch(e){}setTimeout(tick,150)};tick();return true}catch(e){return false}};
+    native().then(async ok=>{if(ok)return;
+      try{await loadScript("vendor/zxing.min.js")}catch(e){st.textContent="Scanner konnte nicht geladen werden. Gib die Nummer unter dem Barcode in die Suche ein.";return}
+      const Z=window.ZXing,hints=new Map();hints.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.EAN_13,Z.BarcodeFormat.EAN_8,Z.BarcodeFormat.UPC_A,Z.BarcodeFormat.UPC_E]);hints.set(Z.DecodeHintType.TRY_HARDER,true);
+      const rd=new Z.MultiFormatReader();rd.setHints(hints);const cv=document.createElement("canvas"),cx=cv.getContext("2d",{willReadFrequently:true});
+      const tick=()=>{if(done)return;const w=vid.videoWidth,hh=vid.videoHeight;
+        if(w&&hh){const cw=Math.min(w,960),ch=Math.round(hh*cw/w);cv.width=cw;cv.height=ch;cx.drawImage(vid,0,0,cw,ch);
+          try{const r=rd.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(cv))));if(r&&r.getText())return stop(r.getText())}catch(e){}}
+        setTimeout(tick,120)};tick()})})}
+async function offByCode(code){
+  try{const ctl=new AbortController();const tm=setTimeout(()=>ctl.abort(),9000);
+    const r=await fetch("https://world.openfoodfacts.org/api/v2/product/"+encodeURIComponent(code)+".json?fields="+OFF_FIELDS,{signal:ctl.signal});clearTimeout(tm);
+    const j=await r.json();const p=j&&j.product;if(!p||!(p.product_name_de||p.product_name)||!p.nutriments||p.nutriments["energy-kcal_100g"]==null)return null;p.code=p.code||code;return p}
+  catch(e){return"offline"}}
+async function foodByCode(code){const known=S.custom.find(c=>c.code===code);if(known)return known;
+  await loadBLS();const p=await offByCode(code);if(p==="offline"){toast("Offline: Barcode später nochmal scannen");return null}
+  if(!p)return null;const f=offFood(p);f.code=code;if(!S.custom.find(c=>c.id===f.id))S.custom.push(f);save();return f}
+
+/* ---------- Eigenes Lebensmittel anlegen (Werte von der Packung) ---------- */
+function ownFoodForm(onDone,pre={}){
+  const fld=(k,label,unit)=>{const i=h("input",{type:"number",inputmode:"decimal",step:"any",id:"own_"+k,value:pre[k]??""});return h("label",{},label+" ("+unit+")",i)};
+  const nm=h("input",{type:"text",id:"own_name",placeholder:"z. B. Proteinriegel Cookie",value:pre.name||""});
+  const box=h("div",{class:"own"},h("p",{class:"small"},"Werte pro 100 g von der Packung. Vitamine und Mineralstoffe ergänzt die App aus dem ähnlichsten Lebensmittel."+(pre.code?" Barcode "+pre.code+" wird gemerkt.":"")),
+    h("label",{},"Name",nm),
+    h("div",{class:"grid2"},fld("kcal","Energie","kcal"),fld("p","Protein","g"),fld("c","Kohlenhydrate","g"),fld("f","Fett","g"),fld("sug","davon Zucker","g"),fld("sfa","gesättigte Fette","g"),fld("fib","Ballaststoffe","g"),fld("salt","Salz","g"),fld("u","Portion","g")),
+    h("button",{class:"btn primary wide",onclick:()=>{const name=nm.value.trim();const v=k=>+String($("#own_"+k).value).replace(",",".")||0;
+      if(!name||!v("kcal")){toast("Name und Energie angeben");return}
+      const f={id:"own"+uid(),name,al:[name.toLowerCase()],n:NK.map(()=>0),u:v("u")||100,fl:"",src:"own"};if(pre.code)f.code=pre.code;
+      for(const k of["kcal","p","c","f","sug","sfa","fib"])f.n[NI[k]]=v(k);f.n[NI.na]=v("salt")*400;
+      const b=BLS&&blsFind(searchText(normalize(name)));const src=b?{n:b.n}:findFood(normalize(name));
+      if(src){const sc=src.n[NI.kcal]>0?Math.min(3,Math.max(0.3,f.n[NI.kcal]/src.n[NI.kcal])):1;const est=[];NK.forEach((k,i)=>{if(i>=NI.vA&&!f.n[i]&&src.n[i]&&k!=="na"){f.n[i]=Math.round(src.n[i]*sc*100)/100;est.push(k)}});if(b)fillMissing(f,b.miss.filter(i=>!f.n[i]),b.name);if(est.length)f.est=[...new Set([...(f.est||[]),...est])];f.u=v("u")||f.u}
+      S.custom.push(f);save();onDone(f)}},"Speichern"));
+  return box}
 
 /* ---------- Ernährung ---------- */
 function renderErnaehrung(){
@@ -1239,7 +1377,8 @@ function renderMehr(){
   root.append(sec("So nutzt du die App",null,h("ul",{class:"list small"},
     h("li",{},"Auf den Homescreen: in Safari auf Teilen tippen, dann „Zum Home-Bildschirm“."),
     h("li",{},"Sprechen: im Textfeld auf das Mikrofon der iPhone-Tastatur tippen. Falls es fehlt: Einstellungen › Allgemein › Tastatur › Diktierfunktion an."),
-    h("li",{},"Grobe Angaben reichen. Unbekanntes suchst du über „+ Lebensmittel hinzufügen“, auch online in Open Food Facts."))));
+    h("li",{},"Grobe Angaben reichen. Unbekanntes suchst du über „+ Lebensmittel hinzufügen“: über 7.000 Lebensmittel aus dem Bundeslebensmittelschlüssel, Barcode-Scan, Online-Suche oder selbst anlegen."))));
+  root.append(sec("Datenquellen",null,h("p",{class:"muted tiny"},"Nährwerte: Max Rubner-Institut (2025): Bundeslebensmittelschlüssel (BLS), Version 4.0, Deutsche Nährstoffdatenbank, Karlsruhe, DOI 10.25826/Data20251217-134202-0, Lizenz CC BY 4.0. Umgerechnet auf die Nährstoffe der App; Selen, Cholin, Polyphenole, Lutein, Lycopin und Kreatin stehen nicht im BLS und werden aus ähnlichen Lebensmitteln geschätzt. Markenprodukte: Open Food Facts (ODbL). Barcode-Scanner: ZXing für JavaScript (MIT).")));
 }
 function exportData(){const blob=new Blob([JSON.stringify(S)],{type:"application/json"});const f=new File([blob],"ultra100-backup-"+todayISO()+".json",{type:"application/json"});
   if(navigator.canShare&&navigator.canShare({files:[f]}))navigator.share({files:[f]}).catch(()=>{});else{const a=h("a",{href:URL.createObjectURL(blob),download:f.name});document.body.append(a);a.click();a.remove()}}
@@ -1256,4 +1395,5 @@ document.addEventListener("visibilitychange",()=>{if(document.hidden)return;if(C
 rehash();
 render();
 syncNow(false);
+setTimeout(loadBLS,1500);
 if("serviceWorker" in navigator&&location.protocol==="https:")navigator.serviceWorker.register("sw.js").catch(()=>{});

@@ -154,7 +154,12 @@ dialog::backdrop{background:rgba(0,0,0,.25)}
 .pk-h{display:flex;gap:8px;padding:12px;border-bottom:1px solid var(--line)}
 #pkList{overflow-y:auto;flex:1}
 .pk-i{display:flex;flex-direction:column;align-items:flex-start;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:10px 14px;font-size:15px}
-.pk-f{padding:10px 12px;border-top:1px solid var(--line)}
+.pk-f{padding:10px 12px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;justify-content:space-between}
+.pk-f .btn{padding:8px 12px;white-space:nowrap}
+.pk-f .link{white-space:nowrap}
+.pk-m{padding:12px 14px;margin:0}
+.own{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+#scVid{width:100%;max-height:60vh;background:#000;display:block;object-fit:cover}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(74px + env(safe-area-inset-bottom));background:var(--ink);color:#fff;padding:9px 16px;border-radius:999px;font-size:14px;z-index:20;white-space:nowrap}
 @media (prefers-reduced-motion:no-preference){.icon-btn.on{animation:p 1.2s infinite}@keyframes p{50%{opacity:.6}}}
 </style>
@@ -182,7 +187,11 @@ dialog::backdrop{background:rgba(0,0,0,.25)}
 <dialog id="picker"><div class="pk">
   <div class="pk-h"><input id="pkQ" type="search" placeholder="Lebensmittel suchen" autocomplete="off"><button class="btn" id="pkClose">Fertig</button></div>
   <div id="pkList"></div>
-  <div class="pk-f"><button class="link" id="pkOff">Online suchen (Open Food Facts)</button></div>
+  <div class="pk-f"><button class="btn" id="pkScan">Barcode scannen</button><button class="link" id="pkOff">Online suchen</button><button class="link" id="pkOwn">Selbst anlegen</button></div>
+</div></dialog>
+<dialog id="scan"><div class="pk">
+  <div class="pk-h"><span id="scSt" class="small" style="flex:1;align-self:center">Barcode ins Bild halten …</span><button class="btn" id="scClose">Abbrechen</button></div>
+  <video id="scVid" playsinline muted autoplay></video>
 </div></dialog>
 <input type="file" id="impF" accept="application/json,.json" hidden>
 <script src="data.js"></script>
