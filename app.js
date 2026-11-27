@@ -214,9 +214,21 @@ function workSum(ds){let km=0,min=0,hard=false,gym=0,walk=0,other=0;if(!hasDay(d
   for(const w of day(ds).workouts){if(w.type==="run"){km+=w.km||0;min+=w.min||0;if((w.rpe||0)>=6)hard=true}else if(w.type==="gym")gym++;else if(w.type==="walk")walk+=w.min||0;else other+=w.min||0}
   return{km,min,hard,gym,walk,other}}
 
+/* ================= Speicher-Nährstoffe =================
+   Was der Körper speichert, muss nicht jeden Tag gedeckt sein: Fettlösliche Vitamine (A, D, E), B12 und Folat
+   (Leber), Eisen (Ferritin), Jod (Schilddrüse), Selen, Kupfer, EPA/DHA (Zellmembranen), Lutein/Lycopin (Gewebe).
+   Für sie zählt der Schnitt der letzten Tage mit Einträgen. Zink, Calcium, Magnesium und Vitamin K haben nur kleine
+   oder langsam verfügbare Speicher: kurzes Fenster. Vitamin C, B1, B2, B3, B5, B6, Biotin, Cholin, Kalium, Protein
+   und Ballaststoffe zählen pro Tag. */
+const DEPOT={vA:7,vD:7,vE:7,b9:7,b12:7,fe:7,io:7,se:7,cu:7,o3:7,lut:7,lyc:7,vK:3,zn:3,ca:3,mg:2};
+function depotDays(ds,n){const out=[ds];for(let i=1;i<n;i++){const d=addDays(ds,-i);if(hasDay(d)&&day(d).entries.length)out.push(d)}return out}
+function effT(ds,T=totals(ds)){const E={...T},win={},memo={[ds]:T};const tot=d=>memo[d]||(memo[d]=totals(d));
+  for(const[k,n]of Object.entries(DEPOT)){const dd=depotDays(ds,n);E[k]=dd.reduce((a,d)=>a+tot(d)[k],0)/dd.length;win[k]=dd.length}
+  E._win=win;return E}
+
 /* ================= Tagesbilanz (Scores) ================= */
 function scores(ds){
-  const T=totals(ds),tg=targetsFor(ds),W=workSum(ds),d=hasDay(ds)?day(ds):{check:{}},w=S.settings.weight||78;
+  const T=totals(ds),E=effT(ds,T),tg=targetsFor(ds),W=workSum(ds),d=hasDay(ds)?day(ds):{check:{}},w=S.settings.weight||78;
   const sleep=d.check.sleep,sl=x=>sleep==null?0.5:ratio(sleep,x);
   const sug=suggest(ds,1)[0];const planKm=sug.km;
   const mk=(got,max,text)=>({got:max?clamp(got,0,max):got,max,text});
@@ -233,21 +245,21 @@ function scores(ds){
   M.push(mk(10*ratio(T.pMeals,4),10,T.pMeals+" von 4 Mahlzeiten mit mind. 25 g Protein"));
   M.push(mk(15*sl(8),15,sleep==null?"Schlaf nicht eingetragen":fmt(sleep,1)+" h Schlaf"));
   const micro=NUTR.filter(n=>n[5]==="v"||n[5]==="n").filter(n=>n[0]!=="na"&&n[3]>0);
-  const cover=micro.reduce((a,n)=>a+ratio(T[n[0]],n[3]),0)/micro.length;
+  const cover=micro.reduce((a,n)=>a+ratio(E[n[0]],n[3]),0)/micro.length;
   L.push(mk(25*cover,25,"Vitamine und Mineralstoffe zu "+fmt(cover*100)+" % gedeckt"));
   L.push(mk(15*ratio(T.fib,38),15,fmt(T.fib)+" von 38 g Ballaststoffen"));
   L.push(mk(15*ratio(T.veg,500),15,fmt(T.veg)+" von 500 g Obst und Gemüse"));
-  L.push(mk(10*ratio(T.o3,0.25),10,fmt(T.o3,2)+" von 0,25 g Omega-3 (EPA+DHA)"));
+  L.push(mk(10*ratio(E.o3,0.25),10,fmt(E.o3,2)+" von 0,25 g Omega-3 (EPA+DHA)"+(E._win.o3>1?", Ø "+E._win.o3+" Tage":"")));
   L.push(mk(W.km||W.walk>=30||W.gym||W.other>=20?10:0,10,W.km||W.walk||W.gym||W.other?"Bewegt":"Noch keine Bewegung"));
   L.push(mk(25*sl(8.5),25,sleep==null?"Schlaf nicht eingetragen":fmt(sleep,1)+" von 8–9 h Schlaf"));
   const longDay=W.min>=90;if(T.addSug>(longDay?150:50))L.push(mk(-Math.min(15,(T.addSug-(longDay?150:50))/3),0,fmt(T.addSug)+" g zugesetzter Zucker"));
   if(T.kcal>500&&T.proc/T.kcal>0.25)L.push(mk(-10,0,fmt(100*T.proc/T.kcal)+" % der Kalorien aus Fast Food"));
   if(T.alc>=0.5)L.push(mk(-Math.min(20,10*T.alc),0,fmt(T.alc,1)+" alkoholische Getränke"));
-  for(const n of NUTR)if(n[4]&&T[n[0]]>n[4])L.push(mk(-5,0,n[1]+" über der Obergrenze ("+fmt(n[4])+" "+n[2]+")"));
+  for(const n of NUTR)if(n[4]&&E[n[0]]>n[4])L.push(mk(-5,0,n[1]+" über der Obergrenze ("+fmt(n[4])+" "+n[2]+")"));
   X.push(mk(25*ratio(T.kcal,tg.kcal*0.9),25,"Kein Energiedefizit: "+fmt(T.kcal)+" von "+fmt(tg.kcal)+" kcal"));
   const fatMin=Math.max(0.8*w,tg.f*0.85);X.push(mk(15*ratio(T.f,fatMin),15,fmt(T.f)+" von "+fmt(fatMin)+" g Fett"));
-  X.push(mk(12*ratio(T.zn,14),12,fmt(T.zn,1)+" von 14 mg Zink"));X.push(mk(12*ratio(T.vD,20),12,fmt(T.vD,1)+" von 20 µg Vitamin D"));
-  X.push(mk(8*ratio(T.mg,400),8,fmt(T.mg)+" von 400 mg Magnesium"));X.push(mk(28*sl(8.5),28,sleep==null?"Schlaf nicht eingetragen":fmt(sleep,1)+" von 8–9 h Schlaf"));
+  X.push(mk(12*ratio(E.zn,14),12,fmt(E.zn,1)+" von 14 mg Zink"+(E._win.zn>1?" (Ø "+E._win.zn+" Tage)":"")));X.push(mk(12*ratio(E.vD,20),12,fmt(E.vD,1)+" von 20 µg Vitamin D"+(E._win.vD>1?" (Ø "+E._win.vD+" Tage)":"")));
+  X.push(mk(8*ratio(E.mg,400),8,fmt(E.mg)+" von 400 mg Magnesium"+(E._win.mg>1?" (Ø "+E._win.mg+" Tage)":"")));X.push(mk(28*sl(8.5),28,sleep==null?"Schlaf nicht eingetragen":fmt(sleep,1)+" von 8–9 h Schlaf"));
   if(T.alc>=0.5)X.push(mk(-Math.min(20,12*T.alc),0,"Alkohol senkt das Testosteron"));
   const sc=a=>Math.round(clamp(a.reduce((s,x)=>s+x.got,0),0,100));
   const pack=(name,col,a)=>({name,col,v:sc(a),parts:a,miss:a.filter(x=>x.max===0||x.got<x.max-0.5).sort((p,q)=>((q.max?q.max-q.got:15)-(p.max?p.max-p.got:15)))});
@@ -494,10 +506,10 @@ function nutriSummary(){
   return sec("Heute",h("span",{class:"muted small"},tg.label),
     h("div",{class:"kcal"},h("div",{},h("div",{class:"big num"},fmt(Math.abs(left))),h("div",{class:"muted small"},left>=0?"kcal übrig":"kcal über dem Ziel")),h("div",{class:"num muted small",style:"text-align:right"},fmt(T.kcal)+" gegessen",h("br"),fmt(tg.kcal)+" Ziel")),
     macro("Protein",T.p,tg.p,"g"),macro("Kohlenhydrate",T.c,tg.c,"g"),macro("Fett",T.f,tg.f,"g"),
-    suggestBox(CUR,T,tg));
+    suggestBox(CUR,effT(CUR,T),tg));
 }
 function warnSec(){
-  const T=totals(CUR);const warn=[];for(const n of NUTR)if(n[4]&&T[n[0]]>n[4])warn.push(n[1]+": "+fmt(T[n[0]],n[6])+" "+n[2]+" liegt über der sicheren Obergrenze von "+fmt(n[4])+" "+n[2]+".");
+  const T=effT(CUR);const warn=[];for(const n of NUTR)if(n[4]&&T[n[0]]>n[4])warn.push(n[1]+": "+fmt(T[n[0]],n[6])+" "+n[2]+(T._win[n[0]]>1?" im Schnitt der letzten "+T._win[n[0]]+" Tage":"")+" liegt über der sicheren Obergrenze von "+fmt(n[4])+" "+n[2]+".");
   if(T.suppMg>250)warn.push("Magnesium aus Supplements "+fmt(T.suppMg)+" mg: Die EFSA nennt 250 mg pro Tag als Obergrenze für Zusätze.");
   return warn.length?sec("Hinweise",null,h("ul",{class:"list warn"},warn.map(w=>h("li",{},w)))):null;
 }
@@ -839,16 +851,16 @@ function renderErnaehrung(){
   }
   root.append(sec("Gegessen",null,list));
   // Nährstoffe komplett
-  const T=totals(CUR),tg=targetsFor(CUR);
-  const grp=(title,g)=>{const rows=NUTR.filter(n=>n[5]===g&&n[3]>0).map(n=>{const v=T[n[0]],r=v/n[3];const over=n[4]&&v>n[4];
-    return h("div",{class:"nr"+(over?" over":r<0.6?" low":"")},h("span",{},n[1]),h("span",{class:"num muted"},fmt(v,n[6])+" / "+fmt(n[3],n[6])+" "+n[2]),bar(v,n[3],"",false),h("span",{class:"num pct"},fmt(Math.min(r*100,999))+" %"))});
+  const T=effT(CUR),tg=targetsFor(CUR);
+  const grp=(title,g)=>{const rows=NUTR.filter(n=>n[5]===g&&n[3]>0).map(n=>{const v=T[n[0]],r=v/n[3];const over=n[4]&&v>n[4];const wn=T._win[n[0]];
+    return h("div",{class:"nr"+(over?" over":r<0.6?" low":"")},h("span",{},n[1],wn>1?h("span",{class:"tiny muted"}," Ø "+wn+" T"):null),h("span",{class:"num muted"},fmt(v,n[6])+" / "+fmt(n[3],n[6])+" "+n[2]),bar(v,n[3],"",false),h("span",{class:"num pct"},fmt(Math.min(r*100,999))+" %"))});
     return h("div",{class:"ngroup"},h("div",{class:"tiny muted up"},title),rows)};
   const m=h("div",{class:"ngroup"},h("div",{class:"tiny muted up"},"Makros"),
     [["Energie",T.kcal,tg.kcal,"kcal"],["Protein",T.p,tg.p,"g"],["Kohlenhydrate",T.c,tg.c,"g"],["Fett",T.f,tg.f,"g"],["Ballaststoffe",T.fib,38,"g"]].map(([l,v,t,u])=>h("div",{class:"nr"},h("span",{},l),h("span",{class:"num muted"},fmt(v)+" / "+fmt(t)+" "+u),bar(v,t),h("span",{class:"num pct"},fmt(Math.min(v/t*100,999))+" %"))),
     h("div",{class:"nr"},h("span",{},"Zugesetzter Zucker"),h("span",{class:"num muted"},fmt(T.addSug)+" g, Ziel < 50 g"),h("span",{}),h("span",{})),
     h("div",{class:"nr"},h("span",{},"Gesättigte Fette"),h("span",{class:"num muted"},fmt(T.sfa)+" g, Ziel < "+fmt(tg.kcal*0.1/9)+" g"),h("span",{}),h("span",{})));
   root.append(sec("Alle Nährstoffe",h("span",{class:"muted tiny"},"Ziele: optimal, unter den Obergrenzen"),m,grp("Vitamine","v"),grp("Mineralstoffe","n"),grp("Fettsäuren","o"),grp("Pflanzenstoffe & Kreatin","x"),
-    h("p",{class:"muted tiny"},"Nährwerte sind Durchschnittswerte, keine Laborwerte. Jod und Biotin sind in den meisten Tabellen lückenhaft, beim Jod hilft Jodsalz. Rot heißt über der sicheren Obergrenze.")));
+    h("p",{class:"muted tiny"},"„Ø … T“: Diese Nährstoffe speichert der Körper (Leber, Fettgewebe, Schilddrüse, Zellmembranen). Ein Tag mit viel gleicht einen Tag mit wenig aus, deshalb zählt der Schnitt deiner letzten Tage mit Einträgen. Vitamin C, die meisten B-Vitamine, Cholin, Kalium und Protein brauchst du täglich. Nährwerte sind Durchschnittswerte, keine Laborwerte. Jod und Biotin sind in den meisten Tabellen lückenhaft, beim Jod hilft Jodsalz. Rot heißt über der sicheren Obergrenze.")));
   root.append(gapSec());
 }
 
@@ -893,7 +905,7 @@ function portionOf(f){return f.id==="paranuss"?10:Math.min(f.p||f.u||100,(f.u||1
 /* Gierige Mengenüberdeckung: nimmt nacheinander das Lebensmittel, das von den noch offenen Lücken
    am meisten schließt (jede Lücke zählt höchstens 1×), bis alles gedeckt ist oder max Lebensmittel. */
 function comboFor(rows,kcalLeft,max=4){
-  const gap={};for(const x of rows)gap[x.k]=x.t-x.v;
+  const gap={};for(const x of rows)gap[x.k]=(x.t-x.v)*(x.w||1);
   const cands=FOOD_LIST.filter(f=>!/[sxal]/.test(f.fl)&&!COMBO_SKIP.has(f.id));
   const picked=[];const g={...gap};let kc=0;
   for(let r=0;r<max&&Object.keys(g).length;r++){
@@ -908,17 +920,17 @@ function comboFor(rows,kcalLeft,max=4){
   const add={};for(const k in gap)add[k]=picked.reduce((a,p)=>a+(p.f.n[NI[k]]||0)*p.portion/100,0);
   return{picked,add,kc}}
 function gapSec(){
-  const T=totals(CUR),tg=targetsFor(CUR);
+  const T=effT(CUR),tg=targetsFor(CUR);
   const all=NUTR.filter(n=>"vnox".includes(n[5])&&n[3]>0&&n[0]!=="na"&&n[0]!=="cr");
   const rows=[["p","Protein",T.p,tg.p,"g",0],["fib","Ballaststoffe",T.fib,NMETA.fib.t,"g",0],...all.map(n=>[n[0],n[1],T[n[0]],n[3],n[2],n[6]])]
-    .map(([k,l,v,t,u,d])=>({k,l,v,t,u,d,r:t?v/t:1})).filter(x=>x.r<1).sort((a,b)=>a.r-b.r);
+    .map(([k,l,v,t,u,d])=>({k,l,v,t,u,d,w:T._win[k]||1,r:t?v/t:1})).filter(x=>x.r<1).sort((a,b)=>a.r-b.r);
   if(!rows.length)return sec("Nährstoffe heute",null,h("p",{class:"small ok-t"},"Alles gedeckt."));
   const C=comboFor(rows,tg.kcal-T.kcal);
-  const after=x=>(x.v+(C.add[x.k]||0))/x.t;
+  const after=x=>(x.v+(C.add[x.k]||0)/x.w)/x.t;
   const full=rows.filter(x=>after(x)>=0.9),rest=rows.filter(x=>after(x)<0.9);
   const nm=k=>{const r=rows.find(x=>x.k===k);return r?r.l.replace(/ \(.*\)/,"").replace(/ Thiamin| Riboflavin| Niacin| Pantothens\./,""):k};
   const s=sec("Heute noch zu wenig",h("span",{class:"muted tiny"},rows.length+" von "+(all.length+2)+" Nährstoffen"));
-  s.append(h("div",{class:"gap-tags"},rows.map(x=>h("span",{class:"gtag"},x.l.replace(/ \(.*\)/,"")+" "+fmt(Math.min(x.r*100,99))+" %"))));
+  s.append(h("div",{class:"gap-tags"},rows.map(x=>h("span",{class:"gtag"},x.l.replace(/ \(.*\)/,"")+" "+fmt(Math.min(x.r*100,99))+" %"+(x.w>1?" Ø":"")))));
   if(C.picked.length){
     s.append(h("div",{class:"tiny muted up",style:"margin-top:12px"},"Diese "+C.picked.length+" Lebensmittel zusammen"));
     for(const p of C.picked)s.append(h("div",{class:"sug-r"},
