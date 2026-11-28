@@ -36,6 +36,24 @@ S.days??={};S.custom??=[];S.learn??={};S.settings??=freshState().settings;S.sett
 for(const d of SUPP_DEFAULT)if(!S.settings.supps.find(s=>s.id===d.id))S.settings.supps.push({...d,active:!d.optional});
 if(!S.settings.mig6){for(const s of S.settings.supps){const d=SUPP_DEFAULT.find(x=>x.id===s.id);if(!d)continue;if(["d3","k2","evoo"].includes(s.id)){s.active=true;if(s.id==="d3")s.dose=d.dose}s.nut=d.nut;s.food=d.food;s.fac=d.fac;s.al=d.al;s.name=d.name;s.unit=d.unit}S.settings.mig6=true}
 if(!S.settings.mig7){for(const s of S.settings.supps){if(s.id==="d3"){s.dose=Math.max(s.dose||0,10000);s.min=10000;s.active=true}if(s.id==="k2"&&(s.dose||0)<200)s.dose=200}S.settings.mig7=true}
+/* Nährstoffziele pro Person. Colins Werte (ohne Einrichtung, kein Geschlecht gesetzt) bleiben genau wie in data.js.
+   Mit Einrichtung: angepasst an Geschlecht, Alter, Kalorien und Aktivität (DGE-Referenzwerte, eher am oberen, „optimalen“ Rand). */
+const NUTR0=NUTR.map(n=>n.slice());
+function personalize(){
+  NUTR.forEach((n,i)=>{n[3]=NUTR0[i][3];n[4]=NUTR0[i][4]});
+  const st=S.settings;if(!st.sex)return;
+  const w=st.sex==="w"?1:st.sex==="d"?0.5:0,age=st.age||25,kc=st.kcal||2500,af={low:0.9,mid:1,high:1.05}[st.act]||1;
+  const fem=(f)=>1-w*(1-f); // Faktor für Frauen gegenüber Männern
+  const T0=Object.fromEntries(NUTR0.map(n=>[n[0],n[3]]));
+  const T={vA:T0.vA*fem(0.8),vE:T0.vE*fem(0.8),vK:T0.vK*fem(0.8),vC:T0.vC*fem(0.75),
+    b1:Math.max(1.0+0.3*(1-w),kc/1000*0.55),b2:Math.max(1.1+0.3*(1-w),kc/1000*0.6),b3:Math.max(13+3*(1-w),kc/1000*6.5),b5:6,b6:T0.b6*fem(0.8),b7:40,b9:400,b12:5,cho:T0.cho*fem(0.77),
+    ca:age<19?1200:1000,ph:age<19?1250:700,mg:(age<19?400:350)*fem(0.86)*af*1.1,k:T0.k*fem(0.85)*af,na:1500,
+    fe:age<51?(11+5*w):11,zn:T0.zn*fem(0.72),cu:T0.cu*fem(0.8),mn:T0.mn*fem(0.85),se:T0.se*fem(0.8),io:age<51?200:180,
+    ala:T0.ala*fem(0.75),fib:clamp(Math.round(kc/1000*14),30,50)};
+  const rnd=(k,v)=>{const d=NUTR0[NI[k]][6];return d?Math.round(v*10**d)/10**d:Math.round(v)};
+  for(const[k,v]of Object.entries(T)){const i=NI[k];if(i==null||!NUTR0[i][3])continue;let t=rnd(k,v);if(NUTR0[i][4])t=Math.min(t,NUTR0[i][4]*0.9);NUTR[i][3]=t}
+  for(const n of NUTR)NMETA[n[0]].t=n[3]}
+personalize();
 let saveT=null;
 /* Änderungszeit je Tag merken, damit der Sync Tage zusammenführen kann */
 let HASH={};function stamp(){const now=Date.now();for(const[k,d]of Object.entries(S.days)){const{u,...rest}=d;const j=JSON.stringify(rest);if(HASH[k]!==undefined&&HASH[k]!==j)d.u=now;HASH[k]=j}
@@ -43,7 +61,9 @@ let HASH={};function stamp(){const now=Date.now();for(const[k,d]of Object.entrie
   for(const k of Object.keys(S.days))if(HASH[k]===undefined)HASH[k]=JSON.stringify((({u,...r})=>r)(S.days[k]))}
 function rehash(){HASH={};stamp()}
 function save(){SUGC={};clearTimeout(saveT);saveT=setTimeout(()=>{try{for(const k of Object.keys(S.days))if(HASH[k]===undefined){HASH[k]=dayWeight(S.days[k])?"":JSON.stringify((({u,...r})=>r)(S.days[k]));}stamp();localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast("Speichern fehlgeschlagen: Speicher voll?")}syncSoon()},150)}
-const NOPLAN=()=>S.settings.plan==="none";
+const NOPLAN=()=>S.settings.plan==="none"||S.settings.plan==="custom"&&!(S.settings.cplan&&S.settings.cplan.weeks&&S.settings.cplan.weeks.length);
+/* Ultra-spezifische Ansichten (Rennen 4.9.2027, Bereitschaft, 41 Wochen) nur beim Ultra-100-Plan */
+const ULTRA=()=>!S.settings.plan||S.settings.plan==="ultra100";
 function day(ds){const d=S.days[ds]||(S.days[ds]={});d.entries??=[];d.workouts??=[];d.check??={};d.supps??={};return d}
 const hasDay=ds=>!!S.days[ds];
 function foodById(id){return FOODS[id]||S.custom.find(c=>c.id===id)||null}
@@ -51,6 +71,7 @@ function foodById(id){return FOODS[id]||S.custom.find(c=>c.id===id)||null}
 /* ================= Plan ================= */
 function planFor(ds){
   if(NOPLAN())return{pre:true,none:true};
+  if(S.settings.plan==="custom")return customPlanFor(ds);
   const diff=Math.round((parseD(ds)-START)/864e5);
   if(diff<0)return{pre:true};const wk=Math.floor(diff/7)+1;if(wk>41)return{post:true};
   const dow=diff%7,r=PLAN[wk-1],[key,di,mi,dn,sa,so,sum,note]=r;
@@ -159,11 +180,12 @@ function effDay(d,sim,today){
 function weekCtx(mon,E){
   const p0=planFor(mon);if(!p0.wk)return null;
   const pl=[...Array(7)].map((_,i)=>planFor(addDays(mon,i)));
-  const planSum=p0.sum,planLong=pl[5].run.km,fl=firstLog();let chronic=null,lr=0;
+  const li=pl.findIndex(x=>x.run&&x.run.kind==="long"),LI=li<0?5:li,r41=p0.wk===41&&!p0.custom;
+  const planSum=p0.sum,planLong=pl[LI].run?pl[LI].run.km:0,fl=firstLog();let chronic=null,lr=0;
   if(fl){const from=addDays(mon,-28),st=fl>from?fl:from,cov=Math.round((parseD(mon)-parseD(st))/864e5);
     if(cov>=14){let k=0;for(let d=st;d<mon;d=addDays(d,1)){const e=E(d);k+=e.km;lr=Math.max(lr,e.longKm)}chronic=k/(cov/7)}}
   let target=planSum,longKm=planLong,basis;
-  if(p0.wk===41)basis="Rennwoche: der Plan gilt genau so.";
+  if(r41)basis="Rennwoche: der Plan gilt genau so.";
   else if(chronic==null)basis="Noch unter 2 Wochen Verlauf in der App, deshalb gilt erstmal der Plan. Danach richte ich die Woche nach deinen Einträgen.";
   else{const cap=Math.max(chronic*1.15,chronic+5,15);target=Math.min(planSum,cap);
     longKm=Math.min(planLong,lr>0?Math.max(lr*1.15,lr+2):10,Math.max(8,target*0.5));
@@ -171,7 +193,7 @@ function weekCtx(mon,E){
       :"Du liegst mit Ø "+fmt(chronic,0)+" km pro Woche im Plan. Es gilt der Plan, Extra-km rechne ich auf die Woche an."}
   target=Math.round(target);longKm=Math.round(longKm*2)/2;
   const keys=pl.map((p,i)=>p.run.kind==="key"?{key:p.run.key,km:p.run.km,dow:i}:null).filter(Boolean);
-  return{mon,wk:p0.wk,planSum,planLong,target,longKm,chronic,lr,keys,pl,basis}}
+  return{mon,wk:p0.wk,planSum,planLong,target,longKm,chronic,lr,keys,pl,basis,LI,r41}}
 function planDay(ds,E,W,today){
   const p=planFor(ds),z=zones(),why=[],gymWhy=[];
   const d=hasDay(ds)?day(ds):null;
@@ -192,17 +214,17 @@ function planDay(ds,E,W,today){
     wk={...W,done,qual};
     if(p.race){kind="race";km=100}
     else{
-      if(!longDone&&W.pl[5].run.kind==="long"){if(dow<=5)longDay=5;else if(dow===6&&!ey.hard&&ey.km===0)longDay=6}
+      if(!longDone&&W.pl[W.LI].run.kind==="long"){if(dow<=W.LI)longDay=W.LI;else if(dow===W.LI+1&&!ey.hard&&ey.km===0)longDay=dow}
       const rem=[];for(let j=dow;j<7;j++){const r=W.pl[j].run;if(j!==longDay&&r.km>0&&r.kind!=="long"&&r.kind!=="walk")rem.push(j)}
-      const longNow=longDay!=null?Math.round(W.longKm*(longDay===6?0.85:1)*2)/2:0;
+      const longNow=longDay!=null?Math.round(W.longKm*(longDay>W.LI?0.85:1)*2)/2:0;
       const budget=W.target-done-longNow,planRest=rem.reduce((a,j)=>a+W.pl[j].run.km,0);
-      const f=W.wk===41?1:planRest>0?clamp(budget/planRest,0.5,1.1):1;
+      const f=W.r41?1:planRest>0?clamp(budget/planRest,0.5,1.1):1;
       const pr=p.run;
       if(dow===longDay){kind="long";km=longNow;
-        if(longDay===6)why.push("Der Long Run von gestern fehlt: heute nachholen, etwas kürzer und ohne zweiten langen Tag.");
+        if(longDay>W.LI)why.push("Der Long Run von gestern fehlt: heute nachholen, etwas kürzer und ohne zweiten langen Tag.");
         else if(km<W.planLong-0.4)why.push("Long Run "+fmt(km,km%1?1:0)+" statt "+W.planLong+" km: "+(W.lr>0?"dein längster Lauf in den letzten 4 Wochen waren "+fmt(W.lr,1)+" km, mehr als etwa +15 % auf einmal überlastet Sehnen und Knochen.":"du hast zuletzt keinen längeren Lauf eingetragen, deshalb erst mal moderat."))}
       else if(rem.includes(dow)){kind=pr.kind;key=pr.key;extra={hilly:pr.hilly};km=Math.round(pr.km*f*2)/2;
-        if(budget<=0&&W.wk!==41){kind="recovery";key=null;km=Math.min(km,5);why.push("Wochenziel ("+W.target+" km) schon erreicht: heute nur kurz und sehr locker.")}
+        if(budget<=0&&!W.r41){kind="recovery";key=null;km=Math.min(km,5);why.push("Wochenziel ("+W.target+" km) schon erreicht: heute nur kurz und sehr locker.")}
         else if(f<0.92)why.push("Angepasst an dein Wochenziel von "+W.target+" km (Plan "+W.planSum+" km)"+(done>0?", "+fmt(done,1)+" km hast du schon.":"."));
         else if(f>1.05)why.push("Etwas mehr als im Plan, damit du auf dein Wochenziel von "+W.target+" km kommst.")}
       else if(pr.kind==="long"&&longDone)why.push("Den Long Run hast du diese Woche schon gemacht: heute lauffrei.");
@@ -245,7 +267,7 @@ function planDay(ds,E,W,today){
     const main=x=>E(x).gym.some(g=>g!=="prehab");
     const upper=["push","pull","mix"].map(s=>[s,sinceS(s)]).sort((a,b)=>b[1]-a[1]);
     const longToday=kind==="long"||(kind==="b2b"&&km>=15),longTomorrow=longDay!=null&&p.dow+1===longDay,yLong=ey.longKm>=20;
-    const legsBlock=W&&W.pl[0].gymNote?W.pl[0].gymNote:p.wk===41?"Rennwoche: keine schweren Beine.":null;
+    const legsBlock=W&&W.pl[0].gymNote?W.pl[0].gymNote:p.wk===41&&!p.custom?"Rennwoche: keine schweren Beine.":null;
     const legsSince=sinceS("beine"),legsOk=!legsBlock&&!longToday&&!longTomorrow&&!yLong&&kind!=="key";
     const slot=p.gym;let g=null;
     if(longToday){if(slot)gymWhy.push("Heute langer Lauf: kein Gym.")}
@@ -607,7 +629,7 @@ function render(){
   const isToday=CUR===todayISO();
   $("#dTitle").textContent=isToday?"Heute":long(CUR);
   const p=planFor(CUR),toRace=Math.round((parseD(RACE)-parseD(CUR))/864e5);
-  $("#dSub").textContent=(isToday?short(CUR)+" · ":"")+(p.wk?"Woche "+p.wk+"/41 · ":"")+(toRace>0&&!NOPLAN()?"noch "+toRace+" Tage bis zum 100er":"");
+  $("#dSub").textContent=((isToday?short(CUR)+" · ":"")+(p.wk?(p.custom?(p.total?"Woche "+p.wk+"/"+p.total+" · ":""):"Woche "+p.wk+"/41 · "):"")+(toRace>0&&ULTRA()?"noch "+toRace+" Tage bis zum 100er":"")).replace(/ · $/,"");
   if(window.ACCT&&!S.settings.onboarded){$$("main.view").forEach(m=>{m.hidden=m.id!=="v-training";if(m.id!=="v-training")m.replaceChildren()});renderOnboarding();return}
   $$("main.view").forEach(m=>{if(m.id!=="v-"+VIEW)m.replaceChildren()});
   const v={training:renderTraining,ernaehrung:renderErnaehrung,fortschritt:renderFortschritt,longevity:renderLongevity,mehr:renderMehr}[VIEW];v();
@@ -697,6 +719,7 @@ function trainingCard(s,withActions){
   const c=h("section",{class:"sec train"});
   c.append(h("div",{class:"sec-h"},h("h2",{},s.ds===todayISO()?"Vorschlag für heute":"Vorschlag für "+short(s.ds)),h("span",{class:"muted tiny"},"aus Plan + deinem Training")));
   if(s.p.note)c.append(h("div",{class:"tiny muted"},"Diese Woche: "+s.p.note));
+  if(s.p.custom&&s.p.txt)c.append(h("div",{class:"small",style:"margin-bottom:6px"},h("span",{class:"muted"},"Laut deinem Plan: "),s.p.txt));
   const runBlock=h("div",{class:"tb"},h("div",{class:"tb-t"},done?"✓ ":"",s.run.title),h("div",{class:"muted small"},s.run.detail));
   if(s.easyPace&&(s.kind==="easy"||s.kind==="long"))runBlock.append(h("div",{class:"muted tiny"},"Deine lockeren Läufe zuletzt: Ø "+pace(s.easyPace)+" /km"));
   if(done)runBlock.append(h("div",{class:"ok-t small"},"Eingetragen: "+s.loggedRuns.map(workoutLine).join("; ")));
@@ -723,7 +746,7 @@ function checkSec(){
   const M={"grün":["good","Grün","Plan wie vorgeschlagen."],"gelb":["warn","Gelb","Tempo raus, Umfang −30 %, 1 Satz weniger."],"rot":["bad","Rot","Pause. Hält es 3 Tage an: Arzt oder Physio."]};
   const flag=(f,l)=>h("button",{class:"chip","aria-pressed":(ch.flags||[]).includes(f)?"true":"false",onclick:()=>{ch.flags=ch.flags||[];ch.flags=ch.flags.includes(f)?ch.flags.filter(x=>x!==f):[...ch.flags,f];save();render()}},l);
   return sec("Morgen-Check",a?h("span",{class:"pill "+M[a][0]},M[a][1]):h("span",{class:"muted small"},"offen"),
-    h("div",{class:"grid3"},h("label",{},"Schlaf (h)",inp("cSleep","8",ch.sleep,"0.25")),h("label",{},"Knie (0–10)",inp("cKnee","0",ch.knee,"1")),h("label",{},"Gewicht (kg)",inp("cW","78,0",ch.weight,"0.1"))),
+    h("div",{class:"grid3"},h("label",{},"Schlaf (h)",inp("cSleep","8",ch.sleep,"0.25")),S.settings.sex?null:h("label",{},"Knie (0–10)",inp("cKnee","0",ch.knee,"1")),h("label",{},"Gewicht (kg)",inp("cW",fmt(S.settings.weight||78,1),ch.weight,"0.1"))),
     h("div",{class:"grid2",style:"margin-top:8px"},h("label",{},"HRV (ms)",inp("cHrv","60",ch.hrv,"1")),h("label",{},"Ruhepuls",inp("cRhr","52",ch.rhr,"1")),h("label",{},"Recovery (%)",inp("cRec","70",ch.rec,"1")),h("label",{},"Strain (0–21)",inp("cStr","10",ch.strain,"0.1"))),
     h("div",{class:"chips"},flag("müde","müde"),flag("stress","Prüfungsstress"),flag("fieber","Fieber"),flag("hinken","Hinken")),
     h("button",{class:"link",onclick:pasteVitals},"Werte aus der Zwischenablage einfügen"),
@@ -1096,8 +1119,8 @@ function weekSec(s){const W=s.week;if(!W)return null;
   const row=(l,v)=>h("div",{class:"pr"},h("div",{},l),h("div",{class:"num pr-v"},v));
   const changed=W.target!==W.planSum||W.longKm!==W.planLong;
   return sec("Deine Woche",h("span",{class:"muted tiny"},"Woche "+W.wk+"/41"),
-    row("Plan",W.planSum+" km · Long Run "+(W.wk===41?"Rennen":W.planLong+" km")),
-    row(changed?"Für dich angepasst":"Für dich",W.target+" km · Long Run "+(W.wk===41?"Rennen":fmt(W.longKm,W.longKm%1?1:0)+" km")),
+    row("Plan",W.planSum+" km · Long Run "+(W.r41?"Rennen":W.planLong+" km")),
+    row(changed?"Für dich angepasst":"Für dich",W.target+" km · Long Run "+(W.r41?"Rennen":fmt(W.longKm,W.longKm%1?1:0)+" km")),
     row("Bis gestern gelaufen",fmt(W.done,1)+" km · harte Einheiten "+W.qual+"/"+W.keys.length),
     row("Kraft letzte 7 Tage",Object.keys(GN).map(g=>GN[g]+(cnt[g]?" ✓":" –")).join(" · ")),
     h("p",{class:"muted tiny",style:"margin-top:6px"},W.basis));}
@@ -1117,7 +1140,7 @@ function renderTraining(){
   root.append(trainingCard(sg[0],true));
   root.append(checkSec());
   const ws0=weekSec(sg[0]);if(ws0)root.append(ws0);
-  root.append(sec("Vorschläge nächste Tage",h("span",{class:"muted tiny"},"passen sich an, sobald du einträgst"),sg.slice(1).map(s=>h("div",{class:"day-s"},h("div",{class:"muted small"},long(s.ds)),h("div",{class:"tb-t"},s.run.title),h("div",{class:"muted tiny"},s.run.detail),s.gym?h("div",{class:"small",style:"margin-top:2px"},"Kraft: "+s.gym.name):null,s.why.concat(s.gymWhy.filter(w=>w!==s.p.gymNote)).length?h("div",{class:"tiny why-1"},s.why.concat(s.gymWhy.filter(w=>w!==s.p.gymNote))[0]):null))));
+  root.append(sec("Vorschläge nächste Tage",h("span",{class:"muted tiny"},"passen sich an, sobald du einträgst"),sg.slice(1).map(s=>h("div",{class:"day-s"},h("div",{class:"muted small"},long(s.ds)),h("div",{class:"tb-t"},s.run.title),h("div",{class:"muted tiny"},s.run.detail),s.p&&s.p.custom&&s.p.txt?h("div",{class:"muted tiny"},"Laut Plan: "+s.p.txt):null,s.gym?h("div",{class:"small",style:"margin-top:2px"},"Kraft: "+s.gym.name):null,s.why.concat(s.gymWhy.filter(w=>w!==s.p.gymNote)).length?h("div",{class:"tiny why-1"},s.why.concat(s.gymWhy.filter(w=>w!==s.p.gymNote))[0]):null))));
   const p=planFor(CUR);const mon=addDays(CUR,-(p.wk?p.dow:dowOf(CUR)));
   const wk=h("div",{class:"week"});let tot=0;
   for(let i=0;i<7;i++){const ds=addDays(mon,i),wl=hasDay(ds)?day(ds).workouts:[];tot+=kmOf(ds);
@@ -1128,7 +1151,8 @@ function renderTraining(){
   root.append(sec("Deine Zonen",h("span",{class:"muted tiny"},z.src),h("div",{class:"zones"},[["R Regeneration","RPE 2–3",zoneTxt(z.R)],["GA Grundlage","RPE 3–4",zoneTxt(z.GA)],["M Steady","RPE 5",zoneTxt(z.M)],["S Schwelle","RPE 6–7",zoneTxt(z.S)],["Berg","RPE 7–8","nur RPE"]].map(r=>h("div",{class:"zr"},h("span",{},r[0]),h("span",{class:"muted"},r[1]),h("span",{class:"num"},r[2])))),
     h("p",{class:"muted tiny"},"RPE geht vor Pace. Nach einem 5-km-Test („5 km Test in 24:30“) rechne ich die Zonen neu.")));
   const open=OPEN.has("plan");
-  if(!NOPLAN())root.append(sec("Dein Plan (Leitlinie)",h("button",{class:"link",onclick:()=>{open?OPEN.delete("plan"):OPEN.add("plan");render()}},open?"Zuklappen":"Anzeigen"),open?planTable():h("p",{class:"muted tiny"},"41 Wochen bis zum 100er. Der Plan gibt Struktur und Ziel vor. Wie viel an welchem Tag dran ist, rechne ich aus dem, was du wirklich trainiert hast.")));
+  if(S.settings.plan==="custom"&&!NOPLAN())root.append(customPlanSec());
+  else if(ULTRA())root.append(sec("Dein Plan (Leitlinie)",h("button",{class:"link",onclick:()=>{open?OPEN.delete("plan"):OPEN.add("plan");render()}},open?"Zuklappen":"Anzeigen"),open?planTable():h("p",{class:"muted tiny"},"41 Wochen bis zum 100er. Der Plan gibt Struktur und Ziel vor. Wie viel an welchem Tag dran ist, rechne ich aus dem, was du wirklich trainiert hast.")));
 }
 function logForm(){
   const F=LOGFORM||(LOGFORM={type:"run"});
@@ -1313,7 +1337,7 @@ function renderFortschritt(){
   const today=CUR,p=planFor(today);
   // Diagramme ganz oben: Läufe + Makros
   root.append(runChartSec(today),macroChartSec(Array.from({length:14},(_,i)=>addDays(today,i-13))));
-  if(NOPLAN()){root.append(riskSec(today))}else root.append(readySec(today),riskSec(today));
+  if(!ULTRA()){root.append(riskSec(today))}else root.append(readySec(today),riskSec(today));
   // Langfristig: Ziel 100 km
   const MS=[["2027-04-03",32,"32 km Meilenstein"],["2027-07-10",42,"Marathon im Training"],["2027-07-31",50,"Generalprobe 50 km"],[RACE,100,"100 km Solo"]];
   const next=MS.find(m=>m[0]>=today)||MS[3];
@@ -1327,7 +1351,7 @@ function renderFortschritt(){
   if(planDays>=3){goal.append(progRow("Kilometer (4 Wochen)",fmt(act4)+" km",h("span",{class:"muted"},"Plan "+fmt(planKm4)+" km"),act4>planKm4*1.2?"Deutlich über Plan: Verletzungsrisiko im Blick behalten.":act4<planKm4*0.7?"Unter Plan. Kein Problem, aber nicht auf einmal nachholen.":"Im Rahmen des Plans."));
     goal.append(progRow("Regelmäßigkeit",fmt(100*runDays/planDays)+" %",null,runDays+" von "+planDays+" Lauftagen im Plan gelaufen"))}
   else goal.append(progRow("Kilometer (4 Wochen)",fmt(act4)+" km",null,"Der Vergleich mit dem Plan startet nach der ersten Planwoche."));
-  if(!NOPLAN())root.append(goal);
+  if(ULTRA())root.append(goal);
   // Kurzfristig
   const a14=addDays(today,-13),b14=addDays(today,-27),b14e=addDays(today,-14);
   const short_=sec("Kurzfristig",h("span",{class:"muted tiny"},"letzte 14 Tage gegen die 14 davor"));
@@ -1557,7 +1581,7 @@ function featureOn(f){if(!window.ACCT)return true;const p=prof();return!!(p&&(p.
 const CSKEY=window.ACCT?"ultra100.sync."+ACCT.uid:"";
 function applyAssigned(p){const a=p&&p.assigned||{};if(!a.u||a.u<=(S.settings.asgU||0))return false;
   for(const k of["plan","weight","kcal","prot"])if(a[k]!=null&&a[k]!=="")S.settings[k]=a[k];
-  S.settings.asgU=a.u;save();toast("Neue Vorgaben übernommen");return true}
+  S.settings.asgU=a.u;personalize();save();toast("Neue Vorgaben übernommen");return true}
 async function cloudSync(manual){
   if(!window.ACCT||SYNCING)return;SYNCING=true;SYNCMSG="Synchronisiere …";if(VIEW==="mehr")render();
   const oldP=JSON.stringify(prof());
@@ -1567,7 +1591,7 @@ async function cloudSync(manual){
     if(!p||!(p.approved||p.is_admin)){SYNCMSG="Wartet auf Freischaltung. Bis dahin bleiben deine Daten nur auf diesem Gerät.";if(manual)toast(SYNCMSG);if(changed||JSON.stringify(prof())!==oldP||VIEW==="mehr")render();return}
     const row=await Cloud.load();const R=row&&row.data;
     const before=JSON.stringify(S);
-    if(R&&R.days){S=mergeState(S,R);S.days??={};S.custom??=[];S.learn??={};rehash();localStorage.setItem(KEY,JSON.stringify(S))}
+    if(R&&R.days){S=mergeState(S,R);S.days??={};S.custom??=[];S.learn??={};rehash();personalize();localStorage.setItem(KEY,JSON.stringify(S))}
     const mine=JSON.stringify(S);
     if(!R||mine!==JSON.stringify(mergeState(R,S)))await Cloud.store(S);
     try{localStorage.setItem(CSKEY,String(Date.now()))}catch(e){}
@@ -1616,7 +1640,7 @@ function adminSec(){
         h("div",{class:"grid3",style:"margin-top:8px"},h("label",{},"Gewicht",iw),h("label",{},"Kalorien",ik),h("label",{},"Protein",ip)),
         h("button",{class:"btn primary wide",onclick:()=>{const v=x=>x.value===""?null:+x.value.replace(",",".");
           const na={plan:pl.value||null,weight:v(iw),kcal:v(ik),prot:v(ip),u:Date.now()};admSet(u,{assigned:na},"Vorgaben gesendet, sie kommen beim nächsten Öffnen an")}},"Vorgaben senden"),
-        h("p",{class:"muted tiny"},"Leere Felder bleiben, wie die Person sie eingestellt hat. Einen eigenen Trainingsplan aus einem PDF baue ich auf Wunsch als weitere Plan-Option ein."));
+        h("p",{class:"muted tiny"},"Leere Felder bleiben, wie die Person sie eingestellt hat. Einen eigenen Plan fügt jede Person selbst unter Einstellungen ein (Text oder PDF)."));
     }
     s.append(row)}
   s.append(h("p",{class:"muted tiny",style:"margin-top:10px"},"Du siehst hier nur Namen, E-Mail und Freigaben. Die Ernährungs- und Trainingsdaten deiner Freunde kann die Datenbank dir nicht zeigen."));
@@ -1631,7 +1655,7 @@ function obCalc(o){if(!(o.w>30&&o.hgt>120&&o.age>10))return null;
 function renderOnboarding(){
   const root=$("#v-training");root.replaceChildren();$("nav.tabs").hidden=true;
   $("#dTitle").textContent="Willkommen";$("#dSub").textContent="Einmal einrichten, dann geht's los";
-  OB??={name:(prof()||{}).name||"",sex:"m",age:null,hgt:null,w:null,act:"mid",goal:"muscle",plan:"none",supps:{},kcal:null,prot:null};
+  OB??={name:(prof()||{}).name||"",sex:"m",age:null,hgt:null,w:null,act:"mid",goal:"muscle",plan:"none",supps:{},own:[],kcal:null,prot:null};
   const num=(label,k,ph,step="1")=>{const i=h("input",{type:"number",inputmode:"decimal",step,placeholder:ph,value:OB[k]??""});i.oninput=()=>{OB[k]=i.value===""?null:+i.value.replace(",",".");if(k!=="kcal"&&k!=="prot"){OB.kcal=OB.prot=null;upd()}};return h("label",{},label,i)};
   const chips=(k,opts)=>h("div",{class:"chips"},opts.map(([v,l])=>h("button",{class:"chip","aria-pressed":OB[k]===v?"true":"false",onclick:()=>{OB[k]=v;if(k!=="plan")OB.kcal=OB.prot=null;renderOnboarding()}},l)));
   const tgt=h("div",{});
@@ -1643,37 +1667,71 @@ function renderOnboarding(){
   upd();
   const iN=h("input",{type:"text",value:OB.name,maxlength:"40",autocomplete:"given-name"});iN.oninput=()=>{OB.name=iN.value};
   const sl=h("div",{});
-  for(const s of SUPP_DEFAULT){const on=!!OB.supps[s.id];sl.append(h("label",{class:"inline"},h("input",{type:"checkbox",checked:on?true:null,onchange:e=>{OB.supps[s.id]=e.target.checked}}),s.name+" ("+fmt(s.dose)+" "+s.unit+")"))}
+  for(const s of[...SUPP_DEFAULT,...OB.own]){const on=!!OB.supps[s.id];sl.append(h("label",{class:"inline"},h("input",{type:"checkbox",checked:on?true:null,onchange:e=>{OB.supps[s.id]=e.target.checked}}),s.name+" ("+fmt(s.dose)+" "+s.unit+")"))}
   root.append(
     sec("Über dich",null,h("label",{},"Vorname",iN),h("div",{class:"tiny muted up",style:"margin-top:12px"},"Geschlecht"),chips("sex",[["m","männlich"],["w","weiblich"],["d","divers"]]),
       h("div",{class:"grid3",style:"margin-top:12px"},num("Alter","age","Jahre"),num("Größe (cm)","hgt","180"),num("Gewicht (kg)","w","75","0.1"))),
     sec("Dein Ziel",null,chips("goal",[["muscle","Muskelaufbau"],["keep","Gewicht halten"],["lose","Abnehmen"],["endur","Ausdauer / Wettkampf"]]),
       h("div",{class:"tiny muted up",style:"margin-top:12px"},"Wie aktiv bist du?"),chips("act",[["low","wenig Sport"],["mid","3–4× pro Woche"],["high","fast täglich"]]),
       h("div",{style:"margin-top:12px"},tgt)),
-    sec("Trainingsplan",null,chips("plan",[["none","Ohne festen Plan"],["ultra100","Ultra-100-Plan (41 Wochen bis 4.9.2027)"]]),
-      h("p",{class:"muted tiny"},"Ohne Plan trägst du einfach ein, was du machst, und bekommst Vorschläge aus deinem Verlauf. Einen eigenen Plan kann dir der Admin später zuweisen.")),
-    sec("Supplements",h("span",{class:"muted tiny"},"optional"),sl,h("p",{class:"muted tiny"},"Dosis änderst du später in den Einstellungen. Eigene Supplements trägst du einfach beim Essen ein.")),
+    sec("Trainingsplan",null,chips("plan",[["none","Ohne festen Plan"],["custom","Eigenen Plan einfügen"],["ultra100","Ultra-100-Plan (41 Wochen bis 4.9.2027)"]]),
+      h("p",{class:"muted tiny"},OB.plan==="custom"?"Nach „Los geht's“ kannst du deinen Plan als Text einfügen oder als PDF laden.":"Ohne Plan trägst du einfach ein, was du machst, und bekommst Vorschläge aus deinem Verlauf. Einen eigenen Plan kannst du jederzeit in den Einstellungen einfügen.")),
+    sec("Supplements",h("span",{class:"muted tiny"},"optional"),sl,suppAddForm(n=>{OB.own.push(n);OB.supps[n.id]=true;renderOnboarding()}),h("p",{class:"muted tiny"},"Die Dosis kannst du später in den Einstellungen ändern.")),
     h("button",{class:"btn primary wide",onclick:async()=>{const c=obCalc(OB);if(!c){toast("Bitte Alter, Größe und Gewicht eintragen");return}
-      const st=S.settings;Object.assign(st,{weight:OB.w,age:OB.age,height:OB.hgt,sex:OB.sex,goal:OB.goal,act:OB.act,plan:OB.plan,kcal:OB.kcal||c.kcal,prot:OB.prot||c.prot,onboarded:true});
-      for(const s of st.supps)s.active=!!OB.supps[s.id];
+      const st=S.settings;const wantPlan=OB.plan==="custom";Object.assign(st,{weight:OB.w,age:OB.age,height:OB.hgt,sex:OB.sex,goal:OB.goal,act:OB.act,plan:wantPlan?"none":OB.plan,kcal:OB.kcal||c.kcal,prot:OB.prot||c.prot,onboarded:true});
+      st.supps.push(...OB.own);for(const s of st.supps)s.active=!!OB.supps[s.id];personalize();
       if(OB.name.trim()&&window.Cloud)Cloud.setName(OB.name.trim()).then(()=>Cloud.profile()).catch(()=>{});
-      OB=null;$("nav.tabs").hidden=false;save();toast("Fertig eingerichtet");setView("training")}},"Los geht's"));
+      OB=null;$("nav.tabs").hidden=false;save();toast("Fertig eingerichtet");if(wantPlan){OPEN.add("pled");PLED=null;setView("mehr")}else setView("training")}},"Los geht's"));
 }
+
+/* ---------- Eigene Supplements ---------- */
+function suppAddForm(onAdd){
+  const box=h("div",{style:"margin-top:10px"});let open=false;
+  const draw=()=>{box.replaceChildren();
+    if(!open){box.append(h("button",{class:"link",onclick:()=>{open=true;draw()}},"+ Eigenes Supplement hinzufügen"));return}
+    const iN=h("input",{type:"text",placeholder:"z. B. Eisen-Bisglycinat",maxlength:"50"}),iD=h("input",{type:"number",inputmode:"decimal",placeholder:"Menge"});
+    const opts=NUTR.filter(n=>"vnox".includes(n[5])&&n[0]!=="caf"&&n[0]!=="na");
+    const sN=h("select",{},h("option",{value:""},"zählt zu keinem Nährstoff"),opts.map(n=>h("option",{value:n[0]},n[1]+" ("+(n[0]==="vD"?"IE":n[2])+")")));
+    const sU=h("select",{},["mg","µg","g","IE","Kapsel","Tablette","ml"].map(u=>h("option",{value:u},u)));
+    const uWrap=h("label",{},"Einheit",sU);sN.onchange=()=>{uWrap.hidden=!!sN.value};
+    box.append(h("div",{class:"tiny muted up"},"Eigenes Supplement"),h("label",{},"Name",iN),
+      h("div",{class:"grid2",style:"margin-top:8px"},h("label",{},"Menge pro Tag",iD),uWrap),
+      h("label",{style:"margin-top:8px"},"Liefert diesen Nährstoff",sN),
+      h("p",{class:"muted tiny"},"Mit Nährstoff zählt die Menge in deine Tageswerte. Die Menge dann in der Einheit in Klammern angeben, bei Mineralien die Menge des reinen Minerals („davon Eisen“)."),
+      h("div",{class:"btn-row"},h("button",{class:"btn primary",onclick:()=>{const name=iN.value.trim(),dose=+String(iD.value).replace(",",".");if(!name){toast("Bitte einen Namen eingeben");return}if(!(dose>0)){toast("Bitte eine Menge eingeben");return}
+          const k=sN.value,n=k?NUTR[NI[k]]:null;
+          onAdd({id:"own_"+uid(),own:true,name,dose,unit:k?(k==="vD"?"IE":n[2]):sU.value,nut:k||null,fac:k==="vD"?0.025:undefined,al:name.toLowerCase(),active:true})}},"Hinzufügen"),
+        h("button",{class:"btn",onclick:()=>{open=false;draw()}},"Abbrechen")))};
+  draw();return box}
+
+/* ---------- Profil-Felder für eingerichtete Konten ---------- */
+function profExtra(){const st=S.settings;
+  const sel=(label,k,opts)=>h("label",{},label,h("select",{onchange:e=>{st[k]=e.target.value;personalize();save();render()}},opts.map(([v,l])=>h("option",{value:v,selected:st[k]===v?true:null},l))));
+  const num=(label,k)=>{const i=h("input",{type:"number",inputmode:"decimal",value:st[k]??""});i.onchange=()=>{const v=+i.value.replace(",",".");if(v>0){st[k]=v;personalize();save();render()}};return h("label",{},label,i)};
+  return h("div",{style:"margin-top:8px"},h("div",{class:"grid2"},sel("Geschlecht","sex",[["m","männlich"],["w","weiblich"],["d","divers"]]),num("Alter","age"),num("Größe (cm)","height"),
+      sel("Aktivität","act",[["low","wenig Sport"],["mid","3–4× pro Woche"],["high","fast täglich"]]),sel("Ziel","goal",[["muscle","Muskelaufbau"],["keep","Gewicht halten"],["lose","Abnehmen"],["endur","Ausdauer / Wettkampf"]])),
+    h("button",{class:"link",onclick:()=>{const c=obCalc({w:st.weight,hgt:st.height,age:st.age,sex:st.sex,act:st.act||"mid",goal:st.goal||"keep"});if(!c){toast("Alter, Größe und Gewicht fehlen");return}st.kcal=c.kcal;st.prot=c.prot;personalize();save();toast("Neu berechnet: "+fmt(c.kcal)+" kcal, "+c.prot+" g Protein");render()}},"Kalorien und Protein neu berechnen"),
+    h("p",{class:"muted tiny"},"Vitamine, Mineralstoffe und Ballaststoffe passen sich an Geschlecht, Alter, Kalorien und Aktivität an."))}
 
 /* ---------- Mehr / Einstellungen ---------- */
 function renderMehr(){
   const root=$("#v-mehr");root.replaceChildren();
   const n=(label,val,on,step="any")=>{const i=h("input",{type:"number",inputmode:"decimal",step,value:val??""});i.onchange=()=>on(i.value===""?null:+i.value.replace(",","."));return h("label",{},label,i)};
+  if(OPEN.has("pled"))root.append(planEditor());
   root.append(sec("Profil",null,h("div",{class:"grid2"},n("Gewicht (kg)",S.settings.weight,v=>{if(v>30){S.settings.weight=v;save()}}),
     n("5-km-Pace (Sek./km)",S.settings.p5?Math.round(S.settings.p5):null,v=>{S.settings.p5=v;S.settings.p5date=v?todayISO():null;save();render()},"1"),
-    n("Kalorien Ruhetag (kcal)",S.settings.kcal||3200,v=>{if(v>=1200&&v<=6000){S.settings.kcal=v;save()}},"50"),
+    n("Kalorien Ruhetag (kcal)",S.settings.kcal||3200,v=>{if(v>=1200&&v<=6000){S.settings.kcal=v;personalize();save()}},"50"),
     n("Protein pro Tag (g)",S.settings.prot||200,v=>{if(v>=30&&v<=400){S.settings.prot=v;save()}},"5")),
-    h("label",{style:"margin-top:8px"},"Trainingsplan",h("select",{onchange:e=>{S.settings.plan=e.target.value;save();render()}},
-      h("option",{value:"ultra100",selected:!NOPLAN()?true:null},"Ultra-100-Plan (41 Wochen bis 4.9.2027)"),h("option",{value:"none",selected:NOPLAN()?true:null},"Ohne festen Plan"))),
+    S.settings.sex?profExtra():null,
+    h("label",{style:"margin-top:8px"},"Trainingsplan",h("select",{onchange:e=>{const v=e.target.value;if(v==="custom"&&!S.settings.cplan){OPEN.add("pled");render();return}S.settings.plan=v;save();render()}},
+      h("option",{value:"ultra100",selected:ULTRA()?true:null},"Ultra-100-Plan (41 Wochen bis 4.9.2027)"),h("option",{value:"none",selected:S.settings.plan==="none"?true:null},"Ohne festen Plan"),
+      h("option",{value:"custom",selected:S.settings.plan==="custom"?true:null},S.settings.cplan?"Mein eigener Plan":"Eigenen Plan einfügen …"))),
+    h("button",{class:"link",onclick:()=>{OPEN.add("pled");PLED=null;render()}},S.settings.cplan?"Eigenen Plan bearbeiten":"Eigenen Plan einfügen (Text oder PDF)"),
     h("p",{class:"muted tiny"},S.settings.p5?"Zonen basieren auf "+pace(S.settings.p5)+" /km (5 km).":"Noch kein 5-km-Test: Zonen aus dem Plan.")));
   const sl=h("div",{});
   S.settings.supps.forEach(s=>{const i=h("input",{type:"number",inputmode:"decimal",value:s.dose,"aria-label":"Dosis"});i.onchange=()=>{s.dose=+i.value.replace(",",".")||0;if(s.min&&s.dose<s.min){s.dose=s.min;i.value=s.min;toast(s.name+": mindestens "+fmt(s.min)+" "+s.unit)}save()};
-    sl.append(h("div",{class:"supp-r"},h("label",{class:"inline"},h("input",{type:"checkbox",checked:s.active?true:null,onchange:e=>{s.active=e.target.checked;save()}}),s.name),i,h("span",{class:"muted tiny"},s.unit)))});
+    sl.append(h("div",{class:"supp-r"},h("label",{class:"inline"},h("input",{type:"checkbox",checked:s.active?true:null,onchange:e=>{s.active=e.target.checked;save()}}),s.name),i,h("span",{class:"muted tiny"},s.unit,s.own?h("button",{class:"x","aria-label":s.name+" entfernen",onclick:()=>{S.settings.supps=S.settings.supps.filter(x=>x!==s);save();render()}},"×"):null)))});
+  sl.append(suppAddForm(n=>{S.settings.supps.push(n);save();toast(n.name+" hinzugefügt");render()}));
   root.append(sec("Meine Supplements",null,sl,h("p",{class:"muted tiny"},"Bei Magnesium und Zink zählt die Menge des reinen Minerals (steht auf der Packung als „davon Magnesium“). Die Dosis fließt in die Nährstoffe ein. "+(S.settings.supps.some(s=>s.id==="d3"&&s.min)?"Vitamin D3: mindestens 10.000 IE, dazu 200 µg K2 (MK-7), also etwa 20 µg K2 je 1.000 IE. 10.000 IE liegen über der EU-Obergrenze von 4.000 IE und gelten als obere Grenze für die Dauer. Lass deshalb alle 3 bis 6 Monate 25-OH-Vitamin-D (Ziel 40–60 ng/ml) und Calcium im Blut messen.":"Vitamin D3: Die EU-Obergrenze liegt bei 4.000 IE am Tag. Wer dauerhaft mehr nimmt, sollte den Wert im Blut messen lassen."))));
   if(window.ACCT){root.append(acctSec());if(isAdmin())root.append(adminSec())}else root.append(syncSec());
   root.append(featureOn("formcheck")?aiSec():sec("KI-Auswertung (Formcheck)",h("span",{class:"pill warn"},"nicht freigeschaltet")));
@@ -1697,7 +1755,7 @@ $("#next").onclick=()=>{CUR=addDays(CUR,1);PREVIEW=null;render()};
 $("#dTitle").onclick=()=>{CUR=todayISO();render()};
 $("#settingsBtn").onclick=()=>setView("mehr");
 $("#pkClose").onclick=()=>$("#picker").close();
-$("#impF").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const j=JSON.parse(await f.text());if(!j.days)throw 0;j.settings??={};j.settings.onboarded=true;S=j;save();toast("Backup geladen");render()}catch(x){toast("Datei ist kein gültiges Backup")}e.target.value=""};
+$("#impF").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const j=JSON.parse(await f.text());if(!j.days)throw 0;j.settings??={};j.settings.onboarded=true;S=j;personalize();save();toast("Backup geladen");render()}catch(x){toast("Datei ist kein gültiges Backup")}e.target.value=""};
 document.addEventListener("visibilitychange",()=>{if(document.hidden)return;if(CUR!==todayISO()&&CUR===addDays(todayISO(),-1)){CUR=todayISO();render()}syncNow(false)});
 rehash();
 render();
