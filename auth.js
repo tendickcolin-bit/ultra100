@@ -58,8 +58,9 @@ const hp=new URLSearchParams(location.hash.slice(1));
 const linkType=hp.get("type"),linkTok=hp.get("access_token");
 if(hp.get("error_description")){history.replaceState(null,"",location.pathname+location.search);setTimeout(()=>alertBox(de(hp.get("error_description"))),0)}
 
-if(SESS&&!linkTok)return; // angemeldet: App normal starten
-window.AUTH_GATE=true;     // app.js startet erst nach der Anmeldung
+const okP=p=>!!(p&&(p.approved||p.is_admin));
+if(SESS&&!linkTok&&okP(ACCT.profile))return; // angemeldet und freigeschaltet: App normal starten
+window.AUTH_GATE=true;     // app.js startet erst nach Anmeldung und Freischaltung
 
 /* ---------- Anmeldebildschirm ---------- */
 const css=`#auth{max-width:420px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 40px) 20px 40px}
@@ -109,9 +110,32 @@ function recoverScreen(){
   root.append(el("form",{onsubmit:async e=>{e.preventDefault();try{await Cloud.setPassword(iP.value);await after()}catch(x){err.textContent=x.message}}},lP,err,el("button",{class:"btn primary wide",type:"submit"},"Speichern")))}
 
 /* Nach der Anmeldung: Daten für dieses Konto auf dem Gerät vorbereiten, dann App starten */
-async function after(){
+async function myProfile(){const id=SESS.user.id;const r=await call("/rest/v1/profiles?id=eq."+id+"&select=*",{token:await token()});const p=r&&r[0]||null;
+  if(p){const all=ls.get(PKEY)||{};all[id]=p;ls.set(PKEY,all)}return p}
+
+/* Bis zur Freischaltung: nur eine Warteseite, die App bleibt zu */
+let waitT=null;
+async function checkApproval(manual){
+  const id=SESS.user.id,WKEY="ultra100.waiting."+id;let p=null;
+  try{p=await myProfile()}catch(e){if(manual)alertBox(e.message||"Keine Verbindung");if(e.status===401)return;}
+  if(okP(p)){clearInterval(waitT);
+    if(!localStorage.getItem(WKEY))return after(true); // war nie auf der Warteseite (z. B. Admin oder schon freigeschaltet)
+    localStorage.removeItem(WKEY);
+    root.replaceChildren(el("h1",{},"Freigabe erfolgt ✓"),el("p",{class:"sub"},"Dein Konto ist freigeschaltet. Du kannst jetzt loslegen."),
+      el("button",{class:"btn primary wide",onclick:()=>after(true)},"Weiter"));return}
+  localStorage.setItem(WKEY,"1");
+  const err=el("div",{class:"err"});
+  root.replaceChildren(el("h1",{},"Fast geschafft"),el("p",{class:"sub"},"Dein Konto ("+SESS.user.email+") ist angelegt und wartet auf die Freischaltung durch Colin."),
+    el("div",{class:"box"},"Sobald Colin dich freigeschaltet hat, steht hier „Freigabe erfolgt“. Du kannst die App solange schließen. Wenn du sie wieder öffnest, siehst du den aktuellen Stand."),
+    err,el("button",{class:"btn primary wide",onclick:()=>checkApproval(true)},"Jetzt prüfen"),
+    el("button",{class:"btn wide",onclick:()=>Cloud.logout(false)},"Abmelden"));
+  if(!waitT)waitT=setInterval(()=>{if(!document.hidden)checkApproval(false)},20000)}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&waitT&&SESS)checkApproval(false)});
+
+async function after(approved){
   const id=SESS.user.id,key="ultra100.u."+id;
   root.replaceChildren(el("h1",{},"Einen Moment"),el("p",{class:"sub"},"Lade deine Daten …"));
+  if(!approved){let p=null;try{p=await myProfile()}catch(e){}if(!okP(p))return checkApproval(false)}
   if(localStorage.getItem(key))return location.replace(location.pathname);
   let cloud=null;try{const r=await call("/rest/v1/user_state?user_id=eq."+id+"&select=data",{token:SESS.access_token});cloud=r&&r[0]&&r[0].data||null}catch(e){}
   let legacy=null;if(!localStorage.getItem(MIGR)){try{legacy=JSON.parse(localStorage.getItem(LEGACY))}catch(e){}}
@@ -139,5 +163,6 @@ if(linkTok){
   const exp=+hp.get("expires_at")||Math.floor(Date.now()/1000)+(+hp.get("expires_in")||3600);
   call("/auth/v1/user",{token:linkTok}).then(u=>{keep({access_token:linkTok,refresh_token:hp.get("refresh_token"),expires_at:exp,user:u});
     if(linkType==="recovery")recoverScreen();else after()}).catch(e=>{screen();alertBox(e.message)});
-}else screen();
+}else if(SESS){root.replaceChildren(el("h1",{},"Einen Moment"),el("p",{class:"sub"},"Prüfe die Freischaltung …"));checkApproval(false)}
+else screen();
 })();
