@@ -30,6 +30,7 @@ try{S=JSON.parse(localStorage.getItem(KEY))||freshState()}catch(e){S=freshState(
 S.days??={};S.custom??=[];S.learn??={};S.settings??=freshState().settings;S.settings.supps??=freshState().settings.supps;
 for(const d of SUPP_DEFAULT)if(!S.settings.supps.find(s=>s.id===d.id))S.settings.supps.push({...d,active:!d.optional});
 if(!S.settings.mig6){for(const s of S.settings.supps){const d=SUPP_DEFAULT.find(x=>x.id===s.id);if(!d)continue;if(["d3","k2","evoo"].includes(s.id)){s.active=true;if(s.id==="d3")s.dose=d.dose}s.nut=d.nut;s.food=d.food;s.fac=d.fac;s.al=d.al;s.name=d.name;s.unit=d.unit}S.settings.mig6=true}
+if(!S.settings.mig7){for(const s of S.settings.supps){if(s.id==="d3"){s.dose=Math.max(s.dose||0,10000);s.min=10000;s.active=true}if(s.id==="k2"&&(s.dose||0)<200)s.dose=200}S.settings.mig7=true}
 let saveT=null;
 /* Änderungszeit je Tag merken, damit der Sync Tage zusammenführen kann */
 let HASH={};function stamp(){const now=Date.now();for(const[k,d]of Object.entries(S.days)){const{u,...rest}=d;const j=JSON.stringify(rest);if(HASH[k]!==undefined&&HASH[k]!==j)d.u=now;HASH[k]=j}
@@ -376,7 +377,7 @@ function foodSuggestions(ds,T,tg,count=4){
   const gaps={};const want=["p","fib","vA","vD","vE","vK","vC","b1","b2","b3","b6","b9","b12","cho","ca","mg","k","fe","zn","se","io","o3","ala","poly","lut"];
   for(const k of want){const t=k==="p"?tg.p:NMETA[k].t;if(t&&T[k]<t)gaps[k]=t-T[k]}
   const kcalLeft=tg.kcal-T.kcal;const picked=[];const g={...gaps};
-  const cands=FOOD_LIST.filter(f=>!/[sxal]/.test(f.fl)&&!["salz","tee","kaffee","oel","rapsoel","leinoel","butter","whey","leber","zucker","honig","sportdrink","gel","proteinriegel","kresse","nori","hefeflocken","kakaopulver","evoo","kokosoel","ghee","huehnerleber","austern","goji","knoblauch","ingwer","chili1"].includes(f.id));
+  const cands=FOOD_LIST.filter(f=>!/[sxal]/.test(f.fl)&&!["salz","tee","kaffee","espresso","wasser","oel","rapsoel","leinoel","butter","whey","leber","zucker","honig","sportdrink","gel","proteinriegel","kresse","nori","hefeflocken","kakaopulver","evoo","kokosoel","ghee","huehnerleber","austern","goji","knoblauch","ingwer","chili1"].includes(f.id));
   for(let r=0;r<count;r++){
     let best=null,bv=0;
     for(const f of cands){if(picked.some(p=>p.f.id===f.id))continue;
@@ -724,6 +725,36 @@ async function pasteVitals(){let t="";try{t=await navigator.clipboard.readText()
   if(!Object.keys(c).length&&P.strainY==null){toast("Keine Werte erkannt");return}
   commit(CUR,{items:[],workouts:[],check:c,supps:{},strainY:P.strainY});toast("Werte übernommen");render()
 }
+/* ---------- Getränke: Wasser (Leitungswasser oder gescannte Flasche) und Kaffee ---------- */
+function isWater(f){return !!f&&(f.id==="wasser"||f.water)}
+function drinkStats(ds){const r={water:0,fluid:0,coffee:0,mel:0,oil:0};if(!hasDay(ds))return r;
+  for(const e of day(ds).entries)for(const it of e.items){const f=it.fid?foodById(it.fid):null;if(!f)continue;const id=f.gen&&COFFEE_EXTRA[f.gen]?f.gen:f.id;
+    if(isWater(f))r.water+=it.g;if((f.fl||"").includes("l"))r.fluid+=it.g;
+    const x=COFFEE_EXTRA[id];if(x){r.coffee+=it.g/(FOODS[id].u||150);r.mel+=x.mel*it.g/100;r.oil+=x.oil*it.g/100}}
+  return r}
+function waterGoal(ds){const w=workSum(ds);return Math.round((S.settings.weight||78)*35+(w.min+w.walk+w.other+w.gym*60)/60*500)}
+function drinkSec(){
+  const st=drinkStats(CUR),goal=waterGoal(CUR),T=effT(CUR);
+  const bottles=S.custom.filter(c=>c.water);const src=foodById(S.settings.waterSrc)&&isWater(foodById(S.settings.waterSrc))?S.settings.waterSrc:"wasser";
+  const add=(fid,g,label)=>{commit(CUR,{items:[{fid,g}],workouts:[],check:{},supps:{},meal:guessMeal()});toast(label+" eingetragen");render()};
+  const srcName=id=>id==="wasser"?"Leitungswasser":foodById(id).name;
+  const scan=async()=>{const code=await scanBarcode();if(!code)return;const f=await foodByCode(code);
+    if(!f){toast("Flasche nicht gefunden, nutze Leitungswasser");return}
+    f.water=true;f.fl="l";f.u=f.p=f.u&&f.u!==100?f.u:500;const tap=FOODS.wasser.n;
+    const noMin=["ca","mg","na","k"].every(k=>!f.n[NI[k]]);if(noMin){["ca","mg","na","k"].forEach(k=>f.n[NI[k]]=tap[NI[k]]);toast("Keine Mineralwerte hinterlegt, nutze Leitungswasser-Werte")}
+    else toast(f.name+": Mineralwerte übernommen");
+    S.settings.waterSrc=f.id;save();render()};
+  const pct=goal?st.water/goal:0;
+  const coffee=st.coffee>0?h("p",{class:"small"},"Kaffee: "+fmt(st.coffee,1)+" Tassen/Shots · Koffein "+fmt(T.caf||0)+" von max. 400 mg · Melanoidine ca. "+fmt(st.mel)+" mg · Cafestol/Kahweol ca. "+fmt(st.oil,1)+" mg"):null;
+  return sec("Wasser & Kaffee",h("span",{class:"muted tiny"},"Wasser "+fmt(st.water/1000,1)+" / "+fmt(goal/1000,1)+" L"),
+    bar(st.water,goal,"",false),
+    h("div",{class:"chips"},[250,500,750,1000].map(g=>h("button",{class:"chip",onclick:()=>add(src,g,fmt(g)+" ml "+srcName(src))},"+ "+(g<1000?g+" ml":"1 L")))),
+    h("div",{class:"chips"},[{id:"wasser"},...bottles].map(b=>h("button",{class:"chip","aria-pressed":b.id===src?"true":"false",onclick:()=>{S.settings.waterSrc=b.id;save();render()}},srcName(b.id))),
+      h("button",{class:"chip",onclick:scan},"Flasche scannen")),
+    h("div",{class:"chips"},h("button",{class:"chip",onclick:()=>add("kaffee",150,"Kaffee")},"+ Kaffee (Tasse)"),h("button",{class:"chip",onclick:()=>add("espresso",30,"Espresso")},"+ Espresso")),
+    coffee,
+    h("p",{class:"muted tiny"},"Ohne Scan zählt deutsches Leitungswasser im Schnitt (je Liter ca. 70 mg Calcium, 12 mg Magnesium, 20 mg Natrium). Mit „Flasche scannen“ gelten die Werte vom Etikett, bis du wieder Leitungswasser wählst. Getränke gesamt heute: "+fmt(st.fluid/1000,1)+" L. Ziel: 35 ml je kg plus 0,5 L je Trainingsstunde."+(pct>=1?" Ziel erreicht.":"")));
+}
 function suppSec(){
   const d=day(CUR);const act=S.settings.supps.filter(s=>s.active);
   const all=act.every(s=>d.supps[s.id]);
@@ -943,7 +974,7 @@ function renderErnaehrung(){
   root.append(quickInput("food"));if(PREVIEW&&PREVIEW.where==="ernaehrung")root.append(previewBox());
   const toPrev=f=>{PREVIEW={text:"",meal:guessMeal(),items:[{fid:f.id,g:f.p||f.u}],workouts:[],check:{},supps:{},unknown:[],where:"ernaehrung"};render()};
   root.append(h("div",{class:"btn-row two"},h("button",{class:"btn",onclick:()=>openPicker(toPrev)},"Suchen"),h("button",{class:"btn",onclick:()=>{openPicker(toPrev);$("#pkScan").click()}},"Barcode scannen")));
-  root.append(nutriSummary());root.append(suppSec());
+  root.append(nutriSummary());root.append(drinkSec());root.append(suppSec());
   const d=hasDay(CUR)?day(CUR):{entries:[]};
   const byMeal={};for(const e of d.entries)(byMeal[e.meal||"snack"]??=[]).push(e);
   const list=h("div",{});
@@ -1006,7 +1037,7 @@ function addUnitRow(onAdd){return h("div",{class:"add-unit"},h("span",{class:"sm
 function cleanW(w){if(w.ex)w.ex=w.ex.filter(e=>e.name&&e.name.trim());if(w.type==="run"&&w.km&&!w.min)w.min=Math.round(w.km*6.8);if(w.type==="run"&&w.min&&!w.km)w.km=Math.round(w.min/6.8*10)/10;return w}
 
 /* ---------- Heute noch zu wenig: eine Kombination, die möglichst alles abdeckt ---------- */
-const COMBO_SKIP=new Set(["salz","tee","kaffee","whey","zucker","honig","sportdrink","gel","proteinriegel","hefeflocken","nori","leber","huehnerleber","austern","kokosoel","ghee","butter","oel","rapsoel","leinoel","evoo","kresse","knoblauch","ingwer","goji","chili1","kakaopulver"]);
+const COMBO_SKIP=new Set(["salz","tee","kaffee","espresso","wasser","whey","zucker","honig","sportdrink","gel","proteinriegel","hefeflocken","nori","leber","huehnerleber","austern","kokosoel","ghee","butter","oel","rapsoel","leinoel","evoo","kresse","knoblauch","ingwer","goji","chili1","kakaopulver"]);
 function portionOf(f){return f.id==="paranuss"?10:Math.min(f.p||f.u||100,(f.u||100)>=100?(f.u||100):(f.u||100)*2,300)}
 /* Gierige Mengenüberdeckung: nimmt nacheinander das Lebensmittel, das von den noch offenen Lücken
    am meisten schließt (jede Lücke zählt höchstens 1×), bis alles gedeckt ist oder max Lebensmittel. */
@@ -1331,7 +1362,7 @@ function renderFortschritt(){
 const c01=v=>Math.max(0,Math.min(1,v));
 const linS=(v,t)=>c01(v/t),invS=(v,ok,bad)=>v<=ok?1:v>=bad?0:1-(v-ok)/(bad-ok);
 const GRP={greens:["spinat","spinat1","mangold","rucola","feldsalat","romana","kresse","gruenkohl","salat","brokkoli","brokkoli1","rosenkohl","weisskohl","rotkohl","pakchoi","chicoree"],berries:["beeren","erdbeere","himbeere","heidelbeere","brombeere","johannisb","kirsche","stachelb","cranberry","goji"],nuts:["mandeln","mandel1","cashew","haselnuss","pistazien","macadamia","pinien","walnuss","nuesse","erdnuss","paranuss","nussmus","kuerbisk","kuerbiskerne","sonnenbl","sesam","hanfsamen","leinsamen","chia"],fish:["lachs","raeucherlachs","thunfisch","thunfrisch","hering","hering1","makrele","sardinen","forelle","fisch","kabeljau","pangasius","garnelen","muscheln","austern","tintenfisch","fischst"],
-  ferm:["sauerkraut","sauerkr1","kefir","joghurt","grjoghurt","skyr","tempeh"],coffee:["kaffee","gruentee","schwtee"],
+  ferm:["sauerkraut","sauerkr1","kefir","joghurt","grjoghurt","skyr","tempeh"],coffee:["kaffee","espresso","gruentee","schwtee"],
   legume:["linsen","rotelinsen","kichererb","bohnen","kidney","weissebohnen","schwarzebohnen","sojabohnen","edamame","erbsen","erbsen1","hummus","tofu","tempeh","falafel"],red:{hack:1,rind:1,rinderfilet:1,kalb:1,lamm:1,wild:1,schweinefilet:1,schwein:1,bolognese:.35,chili:.3,gyros:1,frikadelle:.8,burger:.5,doener:.4,leber:1,lasagne:.15},proc:{salami:1,schinken:1,bratwurst:1,leberkaese:1,schweinebauch:1,raeucherlachs:0}};
 function longData(end){
   const keys=Object.keys(S.days).filter(k=>k<=end).sort();const first=keys[0]||end;
@@ -1340,7 +1371,7 @@ function longData(end){
   const avg=f=>fed.length?fed.reduce((s,d)=>s+f(totals(d)),0)/fed.length:null;
   const serv={greens:0,berries:0,nuts:0,fish:0,legume:0,ferm:0,coffee:0},meat={red:0,proc:0};
   for(const d of fed)for(const e of day(d).entries)for(const it of e.items){const id=it.fid&&(foodById(it.fid)||{}).gen||it.fid;if(!id)continue;
-    for(const g in serv)if(GRP[g].includes(id)&&it.g>=(g==="nuts"?15:g==="coffee"?120:40))serv[g]++;
+    for(const g in serv)if(GRP[g].includes(id)&&it.g>=(g==="nuts"?15:g==="coffee"?(id==="espresso"?25:120):40))serv[g]++;
     if(GRP.red[id])meat.red+=it.g*GRP.red[id];if(GRP.proc[id])meat.proc+=it.g*GRP.proc[id]}
   let act=0,str=0;for(const d of ds){if(!hasDay(d))continue;for(const w of day(d).workouts){if(w.type==="gym"){str++;act+=w.min||60}else act+=w.min||0}}
   const chk=k=>{const v=ds.map(d=>hasDay(d)?day(d).check[k]:null).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null};
@@ -1514,9 +1545,9 @@ function renderMehr(){
     n("5-km-Pace (Sek./km)",S.settings.p5?Math.round(S.settings.p5):null,v=>{S.settings.p5=v;S.settings.p5date=v?todayISO():null;save();render()},"1")),
     h("p",{class:"muted tiny"},S.settings.p5?"Zonen basieren auf "+pace(S.settings.p5)+" /km (5 km).":"Noch kein 5-km-Test: Zonen aus dem Plan.")));
   const sl=h("div",{});
-  S.settings.supps.forEach(s=>{const i=h("input",{type:"number",inputmode:"decimal",value:s.dose,"aria-label":"Dosis"});i.onchange=()=>{s.dose=+i.value.replace(",",".")||0;save()};
+  S.settings.supps.forEach(s=>{const i=h("input",{type:"number",inputmode:"decimal",value:s.dose,"aria-label":"Dosis"});i.onchange=()=>{s.dose=+i.value.replace(",",".")||0;if(s.min&&s.dose<s.min){s.dose=s.min;i.value=s.min;toast(s.name+": mindestens "+fmt(s.min)+" "+s.unit)}save()};
     sl.append(h("div",{class:"supp-r"},h("label",{class:"inline"},h("input",{type:"checkbox",checked:s.active?true:null,onchange:e=>{s.active=e.target.checked;save()}}),s.name),i,h("span",{class:"muted tiny"},s.unit)))});
-  root.append(sec("Meine Supplements",null,sl,h("p",{class:"muted tiny"},"Bei Magnesium und Zink zählt die Menge des reinen Minerals (steht auf der Packung als „davon Magnesium“). Die Dosis fließt in die Nährstoffe ein.")));
+  root.append(sec("Meine Supplements",null,sl,h("p",{class:"muted tiny"},"Bei Magnesium und Zink zählt die Menge des reinen Minerals (steht auf der Packung als „davon Magnesium“). Die Dosis fließt in die Nährstoffe ein. Vitamin D3: mindestens 10.000 IE, dazu 200 µg K2 (MK-7), also etwa 20 µg K2 je 1.000 IE. 10.000 IE liegen über der EU-Obergrenze von 4.000 IE und gelten als obere Grenze für die Dauer. Lass deshalb alle 3 bis 6 Monate 25-OH-Vitamin-D (Ziel 40–60 ng/ml) und Calcium im Blut messen.")));
   root.append(syncSec());
   root.append(sec("Daten",null,h("p",{class:"muted small"},SY.token?"Zusätzlich zum Sync kannst du ein Backup als Datei sichern.":"Ohne Sync liegt alles nur auf diesem Gerät. Mach ab und zu ein Backup."),
     h("div",{class:"btn-row"},h("button",{class:"btn",onclick:exportData},"Backup exportieren"),h("button",{class:"btn",onclick:()=>$("#impF").click()},"Backup laden")),

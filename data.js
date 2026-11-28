@@ -6,7 +6,7 @@ const NUTR=[
  // key, Name, Einheit, Ziel (optimal, deutlich über DGE-Minimum, stets unter der Obergrenze), Obergrenze (UL), Gruppe, Dezimalen
  ["kcal","Energie","kcal",0,0,"m",0],["p","Protein","g",0,0,"m",0],["c","Kohlenhydrate","g",0,0,"m",0],["f","Fett","g",0,0,"m",0],
  ["fib","Ballaststoffe","g",45,0,"m",0],["sug","Zucker","g",0,0,"m",0],["sfa","Gesättigte Fette","g",0,0,"m",0],
- ["vA","Vitamin A","µg",1000,3000,"v",0],["vD","Vitamin D","µg",50,100,"v",1],["vE","Vitamin E","mg",20,300,"v",1],["vK","Vitamin K (K1+K2)","µg",150,0,"v",0],
+ ["vA","Vitamin A","µg",1000,3000,"v",0],["vD","Vitamin D","µg",50,300,"v",1],["vE","Vitamin E","mg",20,300,"v",1],["vK","Vitamin K (K1+K2)","µg",150,0,"v",0],
  ["vC","Vitamin C","mg",200,2000,"v",0],["b1","B1 Thiamin","mg",1.8,0,"v",2],["b2","B2 Riboflavin","mg",1.8,0,"v",2],["b3","B3 Niacin","mg",20,0,"v",1],
  ["b5","B5 Pantothens.","mg",7,0,"v",1],["b6","B6","mg",2,12,"v",2],["b7","Biotin","µg",50,0,"v",0],["b9","Folat","µg",400,0,"v",0],
  ["b12","B12","µg",6,0,"v",1],["cho","Cholin","mg",550,3500,"v",0],
@@ -14,7 +14,8 @@ const NUTR=[
  ["k","Kalium","mg",4700,0,"n",0],["fe","Eisen","mg",11,0,"n",1],["zn","Zink","mg",14,25,"n",1],["cu","Kupfer","mg",1.8,5,"n",2],
  ["mn","Mangan","mg",4,0,"n",1],["se","Selen","µg",100,255,"n",0],["io","Jod","µg",200,600,"n",0],
  ["o3","Omega-3 EPA+DHA","g",0.5,5,"o",2],["ala","Omega-3 ALA","g",2,0,"o",1],
- ["poly","Polyphenole","mg",1000,0,"x",0],["lut","Lutein + Zeaxanthin","µg",6000,0,"x",0],["lyc","Lycopin","µg",6000,0,"x",0],["cr","Kreatin","g",5,0,"x",1]
+ ["poly","Polyphenole","mg",1000,0,"x",0],["lut","Lutein + Zeaxanthin","µg",6000,0,"x",0],["lyc","Lycopin","µg",6000,0,"x",0],["cr","Kreatin","g",5,0,"x",1],
+ ["caf","Koffein","mg",0,400,"x",0]
 ];
 const NK=NUTR.map(n=>n[0]);
 const F=[
@@ -133,8 +134,14 @@ const F=[
 ["ketchup","Ketchup / Soße","ketchup,bbq,barbecue,soße,sauce,dressing,senf",{u:15,fl:"s"},[112,1,26,0.1,0.3,22,0,25,0,1.5,3,4,0.01,0.07,1.4,0.1,0.16,0,9,0,12,15,26,13,900,280,0.4,0.17,0.08,0.1,0.3,3,0,0]],
 ["mayo","Mayonnaise","mayo,mayonnaise,remoulade,aioli",{u:15,fl:"x"},[680,1,0.6,75,0,0.6,6,20,0.2,3,25,0,0,0.02,0,0.1,0.01,0,5,0.1,20,8,25,1,600,20,0.2,0.1,0,0,1.5,2,0,5]],
 ["suppe","Suppe / Brühe","suppe,brühe,bruehe,bouillon,eintopf,gemüsesuppe",{u:300,fl:"l"},[30,1.5,3,1.2,0.8,1,0.3,50,0,0.2,2,2,0.02,0.03,0.6,0.1,0.04,0,6,0.05,5,10,20,5,400,120,0.3,0.1,0.02,0.05,0.5,5,0,0]],
-["kaffee","Kaffee","kaffee,espresso,cappuccino,americano,latte,cafe,filterkaffee",{u:200,fl:"l"},[1,0.1,0,0,0,0,0,0,0,0,0,0,0,0.08,0.2,0.25,0,0,2,0,2.6,2,3,3,2,50,0,0,0,0.02,0,0,0,0]],
-["tee","Tee / Wasser","tee,wasser,mineralwasser,sprudel,grüntee",{u:250,fl:"l"},[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,0,2,5,10,0,0,0,0,0,0,0,0]],
+/* Kaffee mit Colins Werten pro Tasse (150 ml, lang geröstet, Mittelwerte): Koffein 67,5 mg, Chlorogensäuren 40 mg, Kalium 37,5 mg,
+   Magnesium 22 mg, Niacin 1,85 mg, Riboflavin 0,05 mg, dazu Melanoidine 170 mg und Cafestol/Kahweol 1 mg (siehe COFFEE_EXTRA). Hier pro 100 ml. */
+["kaffee","Kaffee (Tasse 150 ml)","kaffee,cappuccino,americano,latte,cafe,café,filterkaffee,tasse kaffee,kaffeetasse",{u:150,p:150,fl:"l"},[1,0.1,0,0,0,0,0,0,0,0,0,0,0,0.033,1.23,0.25,0,0,2,0,2.6,2,3,14.7,2,25,0,0,0,0.02,0,0,0,0]],
+["espresso","Espresso (Shot 30 ml)","espresso,doppio,ristretto,espressoshot",{u:30,p:30,fl:"l"},[9,0.1,1.7,0.2,0,0,0.1,0,0,0,0,0,0,0.18,5.2,0.28,0,0,1,0,0,2,7,80,14,115,0.1,0,0.05,0.05,0,0,0,0]],
+["tee","Tee","tee,kräutertee,früchtetee",{u:250,fl:"l"},[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,0,2,5,10,0,0,0,0,0,0,0,0]],
+/* Leitungswasser, Durchschnitt Deutschland pro 100 ml (ca. 70 mg Calcium, 12 mg Magnesium, 20 mg Natrium, 3 mg Kalium je Liter; regional sehr unterschiedlich).
+   Gescannte Mineralwasser-Flaschen ersetzen diese Werte (Wasser-Abschnitt im Ernährungs-Tab). */
+["wasser","Wasser (Leitungswasser)","wasser,leitungswasser,trinkwasser,glas wasser,mineralwasser,sprudel,sprudelwasser,stilles wasser,wasserflasche",{u:250,p:250,fl:"l"},[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7,0,1.2,2,0.3,0,0,0,0,0,0,0,0]],
 ["bier","Bier","bier,pils,radler,weizen,weissbier,helles",{u:500,fl:"al",dr:330},[43,0.5,3.6,0,0,0,0,0,0,0,0,0,0.01,0.03,0.5,0.04,0.05,0.5,6,0.02,10,4,14,6,4,27,0,0,0,0.01,0.6,1,0,0]],
 ["wein","Wein / Sekt","wein,rotwein,weißwein,weisswein,sekt,prosecco",{u:200,fl:"al",dr:150},[83,0.1,2.7,0,0,0.6,0,0,0,0,0.4,0,0,0.03,0.2,0.04,0.06,0.5,1,0,6,8,20,11,5,100,0.4,0.1,0.01,0.13,0.2,1,0,0]],
 ["laugen","Laugenbrezel / Laugenbrötchen","brezel,breze,brezn,laugenbrötchen,laugenstange,laugenbrezel,laugen",{u:80,fl:"x"},[272,7.8,55,2,2.2,1.5,0.4,0,0,0.3,0,0,0.2,0.15,2.5,0.3,0.05,2,40,0,10,20,90,22,1100,90,2.4,0.6,0.1,0.5,10,2,0,0.05]],
@@ -319,7 +326,7 @@ const F2=[
 ["hefeflocken","Hefeflocken","hefeflocken,nährhefe,edelhefe",{u:10},"hafer",{kcal:325,p:50,c:36,f:4,fib:22,b1:11,b2:11,b3:50,b6:10,b9:2300,b12:20,zn:8,poly:0}]
 ];
 /* Polyphenole, Lutein, Lycopin, Kreatin für die bisherigen Einträge (mg/µg/g pro 100 g) */
-const X={zartbitter:{poly:1660},schoko:{poly:240},kaffee:{poly:200},tee:{poly:50},wein:{poly:101},beeren:{poly:300},apfel:{poly:130},orange:{poly:50},
+const X={zartbitter:{poly:1660},schoko:{poly:240},kaffee:{poly:26.7,caf:45},espresso:{poly:150,caf:212},tee:{poly:50},wein:{poly:101},beeren:{poly:300},apfel:{poly:130},orange:{poly:50},
  mango:{poly:40,lyc:1000},datteln:{poly:200},banane:{poly:20},trauben:{poly:170},kiwi:{poly:30,lut:122},pflaume:{poly:200},granatapfel:{poly:200},
  brokkoli:{poly:50,lut:1400},spinat:{poly:120,lut:12000},gruenkohl:{poly:150,lut:6261},salat:{poly:20,lut:1700},tomate:{poly:45,lyc:2573,lut:123},
  tomsauce:{lyc:15000,poly:40},ketchup:{lyc:17000,poly:20},pizza:{lyc:4000},paprika:{poly:30,lut:51},karotte:{lut:256},zwiebel:{poly:100},zucchini:{lut:1500,poly:20},
@@ -338,14 +345,17 @@ for(const[id,name,al,o,base,ov]of F2){const b=FOODS[base];if(!b){console.warn("B
 for(let i=FOOD_LIST.length-1;i>=0;i--)if(!FOOD_LIST[i].al.length)FOOD_LIST.splice(i,1);
 FOOD_LIST.sort((a,b)=>a.name.localeCompare(b.name,"de"));
 
+/* Kaffee-Extras pro 100 ml, die keine eigene Nährstoffzeile haben (für den Hinweis im Ernährungs-Tab) */
+const COFFEE_EXTRA={kaffee:{mel:113,oil:0.67},espresso:{mel:300,oil:3}};
+
 /* Deine Supplements (Dosen in den Einstellungen änderbar) */
 const SUPP_DEFAULT=[
  {id:"kreatin",name:"Kreatin",dose:5,unit:"g",nut:"cr",al:"kreatin,creatin"},
  {id:"mg",name:"Magnesium-Bisglycinat",dose:350,unit:"mg",nut:"mg",al:"magnesium"},
  {id:"zn",name:"Zink-Bisglycinat",dose:20,unit:"mg",nut:"zn",al:"zink,zinc"},
  {id:"q10",name:"Coenzym Q10",dose:200,unit:"mg",nut:null,al:"q10,coenzym,coq10,ubiquinol"},
- {id:"d3",name:"Vitamin D3",dose:2000,unit:"IE",nut:"vD",fac:0.025,al:"vitamin d,d3,vitamin d3"},
- {id:"k2",name:"Vitamin K2 (MK-7)",dose:100,unit:"µg",nut:"vK",al:"k2,vitamin k2,mk7,mk-7"},
+ {id:"d3",name:"Vitamin D3",dose:10000,min:10000,unit:"IE",nut:"vD",fac:0.025,al:"vitamin d,d3,vitamin d3"},
+ {id:"k2",name:"Vitamin K2 (MK-7)",dose:200,unit:"µg",nut:"vK",al:"k2,vitamin k2,mk7,mk-7"},
  {id:"evoo",name:"Olivenöl extra vergine (kaltgepresst)",dose:15,unit:"ml",food:"evoo",fac:0.91,al:"evoo,extra vergine,extra virgin,kaltgepresstes olivenöl,olivenöl shot,löffel olivenöl"},
  {id:"o3",name:"Omega-3-Kapsel",dose:500,unit:"mg EPA+DHA",nut:"o3",fac:0.001,al:"omega,fischöl,omega-3,omega 3",optional:true}
 ];
