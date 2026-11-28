@@ -11,11 +11,16 @@ const ls={get:k=>{try{return JSON.parse(localStorage.getItem(k))}catch(e){return
 let SESS=ON?ls.get(AKEY):null;
 
 async function call(path,{method="GET",body,token,headers={}}={}){
-  const r=await fetch(base+path,{method,cache:"no-store",headers:{apikey:C.key,"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{}),...headers},body:body==null?undefined:JSON.stringify(body)});
+  const ac=new AbortController(),to=setTimeout(()=>ac.abort(),25000);let r;
+  try{r=await fetch(base+path,{signal:ac.signal,method,cache:"no-store",headers:{apikey:C.key,"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{}),...headers},body:body==null?undefined:JSON.stringify(body)})}
+  catch(x){throw new Error(x.name==="AbortError"?"Der Server antwortet nicht (nach 25 Sekunden abgebrochen).":"Keine Verbindung zum Server. Bist du online?")}
+  finally{clearTimeout(to)}
   const txt=await r.text();let j=null;try{j=txt?JSON.parse(txt):null}catch(e){}
   if(!r.ok){const m=(j&&(j.msg||j.message||j.error_description||j.error))||("Fehler "+r.status);const e=new Error(de(m));e.status=r.status;throw e}
   return j}
 function de(m){m=String(m);
+  if(/reset_password|could not find the function/i.test(m))return"In der Datenbank fehlt die Passwort-Funktion. Colin muss supabase/passwort.sql im SQL Editor ausführen.";
+  if(/error sending|smtp|sending (recovery|magic|confirmation)/i.test(m))return"Die Mail konnte nicht verschickt werden. Bitte die SMTP-Einstellungen in Supabase prüfen. ("+m+")";
   if(/invalid login credentials/i.test(m))return"E-Mail oder Passwort falsch.";
   if(/email not confirmed/i.test(m))return"Bitte bestätige zuerst deine E-Mail (Link im Postfach).";
   if(/already registered|already exists/i.test(m))return"Für diese E-Mail gibt es schon ein Konto. Melde dich an.";
@@ -110,12 +115,12 @@ function forgotScreen(pre){
   const [lE,iE]=field("E-Mail",{type:"email",autocomplete:"email",inputmode:"email",autocapitalize:"off",required:true,value:pre||""});
   const err=el("div",{class:"err"}),btn=el("button",{class:"btn primary wide",type:"submit"},"Neues Passwort zusenden");
   root.replaceChildren(el("h1",{},"Passwort vergessen"),el("p",{class:"sub"},"Gib die E-Mail deines Kontos ein. Du bekommst ein neues Passwort per Mail, mit dem du dich anmelden kannst. Danach kannst du es in den Einstellungen ändern."),
-    el("form",{onsubmit:async e=>{e.preventDefault();err.textContent="";btn.disabled=true;const email=iE.value.trim().toLowerCase();
+    el("form",{onsubmit:async e=>{e.preventDefault();err.textContent="";btn.disabled=true;btn.textContent="Wird gesendet …";const email=iE.value.trim().toLowerCase();
       try{const sent=await call("/rest/v1/rpc/reset_password",{method:"POST",body:{p_email:email}});
         if(sent===true)await call("/auth/v1/recover",{method:"POST",body:{email}});
         root.replaceChildren(el("h1",{},"Mail ist unterwegs"),el("p",{class:"sub"},"Wenn es ein Konto mit "+email+" gibt, steht in der Mail dein neues Passwort. Schau auch im Spam-Ordner nach. Ein neues Passwort gibt es höchstens alle 10 Minuten."),
           el("button",{class:"btn primary wide",onclick:()=>{MODE="login";screen();const i=root.querySelector("input[type=email]");if(i)i.value=email}},"Zur Anmeldung"))}
-      catch(x){err.textContent=x.message||"Keine Verbindung";btn.disabled=false}}},lE,err,btn),
+      catch(x){err.textContent=x.message||"Keine Verbindung";btn.disabled=false;btn.textContent="Nochmal versuchen"}}},lE,err,btn),
     el("button",{class:"btn wide",onclick:()=>{MODE="login";screen()}},"Zurück zur Anmeldung"))}
 
 /* Nach dem Link aus der Passwort-E-Mail: neues Passwort setzen */
