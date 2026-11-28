@@ -15,4 +15,5 @@ Statische Dateien, keine Build-Schritte. Läuft auf GitHub Pages.
 
 - `bls.json`: Max Rubner-Institut (2025): Bundeslebensmittelschlüssel (BLS), Version 4.0 – Deutsche Nährstoffdatenbank. Karlsruhe. DOI: [10.25826/Data20251217-134202-0](https://doi.org/10.25826/Data20251217-134202-0). Lizenz [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de). Auf die Nährstoffe der App umgerechnet mit `tools/bls_build.py` (Download: https://blsdb.de/download). Selen, Cholin, Polyphenole, Lutein, Lycopin und Kreatin enthält der BLS nicht; die App schätzt sie aus dem ähnlichsten eigenen Lebensmittel.
 - Markenprodukte: [Open Food Facts](https://world.openfoodfacts.org) (ODbL).
+- `vendor/pdfjs/`: [PDF.js](https://github.com/mozilla/pdf.js) 3.11.174 (Apache-2.0), liest Trainingspläne aus PDFs, nur bei Bedarf geladen.
 - `vendor/zxing.min.js`: [ZXing für JavaScript](https://github.com/zxing-js/library) 0.21.3 (MIT), nur geladen, wenn das iPhone keinen eingebauten Barcode-Leser hat.
