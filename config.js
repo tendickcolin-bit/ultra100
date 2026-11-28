@@ -4,6 +4,6 @@
    NIEMALS den "service_role"/"secret"-Schlüssel hier eintragen.
    Solange beide leer sind, läuft die App wie bisher ohne Konto, nur auf dem Gerät. */
 window.U100_CLOUD={
-  url:"",
-  key:""
+  url:"https://zwnftrunpvnqigkywlwm.supabase.co",
+  key:"sb_publishable_rdpUWC3JGvAGgsm0oKs-Yg_K69hvgtL"
 };
