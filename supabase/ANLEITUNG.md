@@ -27,9 +27,14 @@ Der eingebaute Mailversand von Supabase schickt nur an Mitglieder deines Supabas
    - Host: `smtp.mail.me.com` · Port: `587`
    - Username: deine iCloud-Adresse · Password: das App-spezifische Passwort
    - Speichern.
-3. **Optional, Mail auf Deutsch:** Authentication › Emails › Templates › „Reset Password“. Betreff: `Ultra 100: Passwort zurücksetzen`, Text:
-   `<p>Tippe auf den Link, um ein neues Passwort für Ultra 100 festzulegen:</p><p><a href="{{ .ConfirmationURL }}">Neues Passwort festlegen</a></p><p>Wenn du das nicht angefordert hast, ignoriere diese Mail.</p>`
-4. Testen: in der App abmelden, „Passwort vergessen?“, Mail öffnen, Link antippen, neues Passwort setzen.
+3. **Funktion für neue Passwörter:** im SQL Editor den Inhalt von `supabase/passwort.sql` ausführen (bei neuen Projekten steckt er schon in `schema.sql`).
+4. **Mailvorlage:** Authentication › Emails › Templates › „Reset Password“. Den bisherigen Text komplett ersetzen.
+   Betreff: `Ultra 100: dein neues Passwort`
+   Text:
+   `<p>Hallo,</p><p>dein neues Passwort für Ultra 100 lautet:</p><p style="font-size:20px"><b>{{ .Data.temp_pw }}</b></p><p>Melde dich damit in der App an und leg danach unter Einstellungen › Konto › „Passwort ändern“ ein eigenes fest.</p><p>Wenn du kein neues Passwort angefordert hast, melde dich bei Colin.</p>`
+5. Testen: in der App abmelden, „Passwort vergessen?“, E-Mail eingeben, mit dem Passwort aus der Mail anmelden.
+
+So funktioniert es: Die App ruft die Datenbank-Funktion `reset_password` auf. Sie setzt ein zufälliges Passwort aus 10 Zeichen (höchstens alle 10 Minuten pro Konto) und legt es kurz in den Nutzerdaten ab. Danach schickt Supabase die Vorlage oben, die das Passwort einsetzt. Sobald sich die Person damit anmeldet, löscht die App das Passwort wieder aus den Nutzerdaten und zeigt den Hinweis, ein eigenes festzulegen.
 
 Hinweis: Die Mails kommen dann von deiner iCloud-Adresse, deine Freunde sehen sie als Absender.
 

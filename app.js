@@ -1608,8 +1608,10 @@ function acctSec(){
   s.append(h("p",{class:"small"},(p.name?p.name+" · ":"")+ACCT.email),
     h("p",{class:"small"},"Cloud-Sync: zuletzt "+when+(SYNCMSG?" · ":""),SYNCMSG?h("span",{class:SYNCMSG.startsWith("Sync-Fehler")||SYNCMSG.startsWith("Wartet")?"warn-t":"muted"},SYNCMSG):null),
     h("div",{class:"btn-row"},h("button",{class:"btn",onclick:()=>cloudSync(true)},"Jetzt synchronisieren"),h("button",{class:"btn",onclick:()=>{ACC_UI.pw=!ACC_UI.pw;render()}},"Passwort ändern"),h("button",{class:"btn",onclick:()=>Cloud.logout(false)},"Abmelden")));
+  let hint=false;try{hint=!!localStorage.getItem("ultra100.pwhint")}catch(e){}
+  if(hint){ACC_UI.pw=true;s.append(h("p",{class:"hint small"},"Du bist mit dem Passwort aus der Mail angemeldet. Leg hier ein eigenes fest."))}
   if(ACC_UI.pw){const i=h("input",{type:"password",autocomplete:"new-password",placeholder:"mindestens 6 Zeichen"});
-    s.append(h("label",{style:"margin-top:10px"},"Neues Passwort",i),h("button",{class:"btn primary wide",onclick:async()=>{if(i.value.length<6){toast("Mindestens 6 Zeichen");return}try{await Cloud.setPassword(i.value);ACC_UI.pw=false;toast("Passwort geändert");render()}catch(e){toast(e.message)}}},"Speichern"))}
+    s.append(h("label",{style:"margin-top:10px"},"Neues Passwort",i),h("button",{class:"btn primary wide",onclick:async()=>{if(i.value.length<6){toast("Mindestens 6 Zeichen");return}try{await Cloud.setPassword(i.value);ACC_UI.pw=false;try{localStorage.removeItem("ultra100.pwhint")}catch(e){}toast("Passwort geändert");render()}catch(e){toast(e.message)}}},"Speichern"))}
   s.append(h("p",{class:"muted tiny"},"Deine Daten werden automatisch mit deinem Konto synchronisiert, auf jedem Gerät, auf dem du dich anmeldest. Niemand sonst kann sie lesen, auch der Admin nicht. Formcheck-Fotos und ein KI-Schlüssel bleiben nur auf diesem Gerät."),
     h("button",{class:"link danger",onclick:()=>{ACC_UI.del=!ACC_UI.del;render()}},"Konto löschen …"));
   if(ACC_UI.del)s.append(h("div",{class:"small"},"Konto und alle Daten in der Cloud endgültig löschen? ",h("button",{class:"btn danger",onclick:async()=>{try{await Cloud.deleteMe()}catch(e){toast(e.message)}}},"Ja, endgültig löschen")));
@@ -1759,7 +1761,8 @@ $("#pkClose").onclick=()=>$("#picker").close();
 $("#impF").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const j=JSON.parse(await f.text());if(!j.days)throw 0;j.settings??={};j.settings.onboarded=true;S=j;personalize();save();toast("Backup geladen");render()}catch(x){toast("Datei ist kein gültiges Backup")}e.target.value=""};
 document.addEventListener("visibilitychange",()=>{if(document.hidden)return;if(CUR!==todayISO()&&CUR===addDays(todayISO(),-1)){CUR=todayISO();render()}syncNow(false)});
 rehash();
-render();
+try{if(window.ACCT&&localStorage.getItem("ultra100.pwhint")&&S.settings.onboarded)VIEW="mehr"}catch(e){}
+if(VIEW==="mehr"){setView("mehr");setTimeout(()=>{const e=$("#v-mehr .hint");if(e)e.scrollIntoView({block:"center"})},50)}else render();
 syncNow(false);
 setTimeout(loadBLS,1500);
 if("serviceWorker" in navigator&&location.protocol==="https:")navigator.serviceWorker.register("sw.js").catch(()=>{});

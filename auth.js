@@ -24,7 +24,9 @@ function de(m){m=String(m);
   if(/unable to validate email|invalid format/i.test(m))return"Die E-Mail-Adresse stimmt nicht.";
   if(/row-level security|permission denied/i.test(m))return"Dein Konto ist noch nicht freigeschaltet.";
   return m}
-function keep(s){SESS={access_token:s.access_token,refresh_token:s.refresh_token,expires_at:s.expires_at||Math.floor(Date.now()/1000)+(s.expires_in||3600),user:{id:s.user.id,email:s.user.email}};ls.set(AKEY,SESS)}
+function keep(s){if(s.user&&s.user.user_metadata&&s.user.user_metadata.temp_pw){ls.set("ultra100.pwhint",1);
+    fetch(base+"/auth/v1/user",{method:"PUT",headers:{apikey:C.key,"Content-Type":"application/json",Authorization:"Bearer "+s.access_token},body:JSON.stringify({data:{temp_pw:null}})}).catch(()=>{})}
+  SESS={access_token:s.access_token,refresh_token:s.refresh_token,expires_at:s.expires_at||Math.floor(Date.now()/1000)+(s.expires_in||3600),user:{id:s.user.id,email:s.user.email}};ls.set(AKEY,SESS)}
 let refreshing=null;
 async function token(){
   if(!SESS)throw new Error("Nicht angemeldet");
@@ -98,10 +100,23 @@ function screen(){
     }catch(x){err.textContent=x.message||"Keine Verbindung"}finally{btn.disabled=false}}},
     MODE==="signup"?lN:null,lE,lP,err,btn);
   root.append(f);
-  if(MODE==="login")root.append(el("button",{class:"link",onclick:async()=>{const email=iE.value.trim();if(!email){err.textContent="Trag oben deine E-Mail ein, dann tippe nochmal hier.";return}
-    try{await call("/auth/v1/recover?redirect_to="+encodeURIComponent(location.origin+location.pathname),{method:"POST",body:{email}});err.textContent="";root.append(el("p",{class:"ok"},"Falls es ein Konto gibt, kommt gleich eine E-Mail mit einem Link zum Zurücksetzen."))}catch(x){err.textContent=x.message}}},"Passwort vergessen?"));
+  if(MODE==="login")root.append(el("button",{class:"link",onclick:()=>forgotScreen(iE.value.trim())},"Passwort vergessen?"));
   root.append(el("p",{class:"muted tiny",style:"margin-top:24px"},"Deine Daten liegen bei Supabase und werden verschlüsselt übertragen. Niemand sonst sieht sie, auch der Admin nicht. Formcheck-Fotos bleiben nur auf deinem Gerät."));
 }
+
+/* Passwort vergessen: eigene Seite. Die Datenbank setzt ein Zufallspasswort (10 Zeichen),
+   Supabase schickt es mit der Vorlage „Reset Password“ ({{ .Data.temp_pw }}) per Mail. */
+function forgotScreen(pre){
+  const [lE,iE]=field("E-Mail",{type:"email",autocomplete:"email",inputmode:"email",autocapitalize:"off",required:true,value:pre||""});
+  const err=el("div",{class:"err"}),btn=el("button",{class:"btn primary wide",type:"submit"},"Neues Passwort zusenden");
+  root.replaceChildren(el("h1",{},"Passwort vergessen"),el("p",{class:"sub"},"Gib die E-Mail deines Kontos ein. Du bekommst ein neues Passwort per Mail, mit dem du dich anmelden kannst. Danach kannst du es in den Einstellungen ändern."),
+    el("form",{onsubmit:async e=>{e.preventDefault();err.textContent="";btn.disabled=true;const email=iE.value.trim().toLowerCase();
+      try{const sent=await call("/rest/v1/rpc/reset_password",{method:"POST",body:{p_email:email}});
+        if(sent===true)await call("/auth/v1/recover",{method:"POST",body:{email}});
+        root.replaceChildren(el("h1",{},"Mail ist unterwegs"),el("p",{class:"sub"},"Wenn es ein Konto mit "+email+" gibt, steht in der Mail dein neues Passwort. Schau auch im Spam-Ordner nach. Ein neues Passwort gibt es höchstens alle 10 Minuten."),
+          el("button",{class:"btn primary wide",onclick:()=>{MODE="login";screen();const i=root.querySelector("input[type=email]");if(i)i.value=email}},"Zur Anmeldung"))}
+      catch(x){err.textContent=x.message||"Keine Verbindung";btn.disabled=false}}},lE,err,btn),
+    el("button",{class:"btn wide",onclick:()=>{MODE="login";screen()}},"Zurück zur Anmeldung"))}
 
 /* Nach dem Link aus der Passwort-E-Mail: neues Passwort setzen */
 function recoverScreen(){
