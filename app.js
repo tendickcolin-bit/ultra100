@@ -36,7 +36,7 @@ let HASH={};function stamp(){const now=Date.now();for(const[k,d]of Object.entrie
   const st=JSON.stringify([S.settings,S.custom.length,Object.keys(S.learn||{}).length].map((x,i)=>i?x:{...x,u:0}));if(HASH._s!==undefined&&HASH._s!==st)S.settings.u=now;HASH._s=st;
   for(const k of Object.keys(S.days))if(HASH[k]===undefined)HASH[k]=JSON.stringify((({u,...r})=>r)(S.days[k]))}
 function rehash(){HASH={};stamp()}
-function save(){clearTimeout(saveT);saveT=setTimeout(()=>{try{for(const k of Object.keys(S.days))if(HASH[k]===undefined){HASH[k]=dayWeight(S.days[k])?"":JSON.stringify((({u,...r})=>r)(S.days[k]));}stamp();localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast("Speichern fehlgeschlagen: Speicher voll?")}syncSoon()},150)}
+function save(){SUGC={};clearTimeout(saveT);saveT=setTimeout(()=>{try{for(const k of Object.keys(S.days))if(HASH[k]===undefined){HASH[k]=dayWeight(S.days[k])?"":JSON.stringify((({u,...r})=>r)(S.days[k]));}stamp();localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast("Speichern fehlgeschlagen: Speicher voll?")}syncSoon()},150)}
 function day(ds){const d=S.days[ds]||(S.days[ds]={});d.entries??=[];d.workouts??=[];d.check??={};d.supps??={};return d}
 const hasDay=ds=>!!S.days[ds];
 function foodById(id){return FOODS[id]||S.custom.find(c=>c.id===id)||null}
@@ -122,58 +122,163 @@ function runDesc(kind,key,km,z,extra={}){
   if((m=t.match(/Berg.*?(\d+)×(\d+) (min|s)/)))return{title:fmt(km)+" km mit Berg "+m[1]+"×"+m[2]+" "+m[3],detail:"Einlaufen, "+m[1]+"× "+m[2]+" "+m[3]+" bergauf (RPE 7–8)"+(/Power-Hiking/.test(t)?" als Power-Hiking":"")+", runter locker traben oder gehen"};
   return{title:fmt(km)+" km "+t,detail:"GA "+GA};
 }
-/* Vorschläge für mehrere Tage, beginnend bei ds */
-function suggest(from,n=3){
-  const out=[];let carry=null;const today=todayISO();
-  for(let i=0;i<n;i++){
-    const ds=addDays(from,i),p=planFor(ds),z=zones(),why=[];
-    const d=hasDay(ds)?day(ds):null;
-    const amp=ds===today&&d?ampelOf(d.check,ds):null;const R=ds===today&&d?readiness(ds):null;
-    let kind="rest",km=0,key=null,extra={};
-    if(p.wk){kind=p.run.kind;km=p.run.km;key=p.run.key;extra={hilly:p.run.hilly}}
-    else if(p.pre){const dw=dowOf(ds);if(dw===1||dw===3||dw===5){kind="easy";km=6}}
-    else{kind="easy";km=5}
-    // gestern hart? (eingetragen oder vorgeschlagen)
-    const y=addDays(ds,-1);const yHard=isHardDay(y)||(i>0&&out[i-1].hard&&!runsOf(y).length);
-    if((kind==="key")&&yHard){carry={key,km};kind="easy";why.push("Gestern war hart: heute locker, die Schlüsseleinheit kommt morgen (nie zwei harte Tage hintereinander).")}
-    else if(carry&&(kind==="easy"||kind==="strides")&&!yHard&&p.dow!==4&&p.dow!==5){kind="key";key=carry.key;km=Math.max(km,carry.km);why.push("Schlüsseleinheit von gestern hierher verschoben.");carry=null}
-    if(carry&&p.dow>=4){carry=null}
-    // Belastung der letzten Wochen
-    const acute=kmRange(addDays(ds,-7),addDays(ds,-1)),chronic=kmRange(addDays(ds,-28),addDays(ds,-8))/3;
-    if(km>0&&chronic>8&&acute>1.3*chronic){km=Math.round(km*0.85*2)/2;why.push(`Die letzten 7 Tage ${fmt(acute)} km, sonst Ø ${fmt(chronic)} km: heute etwas kürzer.`)}
-    // Wochensumme
-    if(p.wk&&km>0){const mon=addDays(ds,-p.dow);const done=kmRange(mon,addDays(ds,-1));if(done+km>p.sum*1.15&&kind!=="race"){const nk=Math.max(0,Math.round((p.sum*1.1-done)*2)/2);if(nk<km){why.push(`Diese Woche schon ${fmt(done,1)} von ${p.sum} km: heute weniger.`);km=nk;if(km<3){kind="rest";km=0}}}}
-    // Ampel
-    if(amp==="gelb"&&km>0){km=Math.round(km*0.7*2)/2;if(kind==="key"||kind==="strides")kind="easy";why.push("Ampel gelb"+(R&&R.why.length?" ("+R.why.join(", ")+")":"")+": alles locker, Umfang −30 %.")}
-    if(amp==="rot"){kind="rest";km=0;why.push(R&&R.rot?"HRV deutlich unten und Ruhepuls deutlich oben: oft ein Zeichen, dass ein Infekt kommt. Heute Pause.":"Ampel rot: Pause. Hält es 3 Tage an, zum Arzt oder Physio.")}
-    if(amp==="grün"&&R&&R.good&&kind==="key")why.push("Recovery grün: gute Voraussetzungen für die Schlüsseleinheit.");
-    const knee=d&&d.check.knee;
-    if(knee>=3&&knee<5&&km>0)why.push("Knie "+knee+"/10: Alternative wäre 40 min locker Rad oder Schwimmen.");
-    const run=runDesc(kind,key,km,z,extra);
-    // Gym
-    let gym=null,gymWhy=[];
-    if(amp!=="rot"){
-      let g=p.wk?p.gym:(p.pre?null:null);
-      const mon=p.wk?addDays(ds,-p.dow):addDays(ds,-dowOf(ds));
-      const done=new Set();for(let x=mon;x<ds;x=addDays(x,1))for(const w of gymOf(x))done.add(w.session);
-      if(i>0)for(let j=0;j<i;j++)if(out[j].gym)done.add(out[j].gym.id);
-      const upper=["push","pull","mix"];
-      if(g&&upper.includes(g)&&done.has(g)){const miss=upper.find(u=>!done.has(u));if(miss){gymWhy.push(GYM[g].name+" hast du diese Woche schon gemacht, deshalb heute "+GYM[miss].name+".");g=miss}else{g=null;gymWhy.push("Alle Oberkörper-Einheiten dieser Woche erledigt.")}}
-      if(!g&&p.wk&&p.dow===2){const plannedBefore=["push"].filter(u=>!done.has(u));if(plannedBefore.length){g=plannedBefore[0];gymWhy.push("Push von Dienstag fehlt noch: heute nachholen (≥ 6 h nach dem Lauf).")}}
-      if(g){
-        const tpl=GYM[g];let adj=(p.deload?-1:0)+(amp==="gelb"?-1:0);
-        const exs=tpl.ex.map(e=>{let s=e[1]+adj;if(tpl.leg&&p.legsLate)s=Math.min(s,2);return prescribe(e,Math.max(1,s))});
-        if(p.deload)gymWhy.push("Entlastungswoche: 1 Satz weniger.");
-        gym={id:g,name:tpl.name,ex:exs,rir:tpl.leg?"RIR 2–3, nie bis zum Muskelversagen":"RIR 0–2"};
-      }
-    }
-    const hard=kind==="key"||kind==="long"&&km>=20||kind==="race";
-    const loggedRuns=runsOf(ds),loggedGym=gymOf(ds);
-    out.push({ds,p,kind,km,key,run,why,gym,gymWhy:gymWhy.concat(p.gymNote?[p.gymNote]:[]),hard,amp,loggedRuns,loggedGym,easyPace:easyPaceRecent(ds),z});
+/* ================= Adaptive Steuerung =================
+   Der Plan ist der Rahmen (Wochenstruktur, Schlüsseleinheiten, Endziel).
+   Wie viel und was genau an einem Tag dran ist, richtet sich nach dem, was du wirklich trainiert hast:
+   Wochen-km aus deinem 4-Wochen-Schnitt (max. +15 %), Long Run aus deinem längsten Lauf (max. +15 %),
+   verpasste Tempo-Einheiten und Long Runs wandern, verpasste km werden höchstens zu +10 % auf die Resttage verteilt,
+   Kraft rotiert nach "am längsten her" statt nach festem Wochentag. */
+let SUGC={};
+const RPE_DEF={run:4,gym:6,swim:5,bike:5,other:5,walk:2};
+function wLoad(w){const min=w.min||(w.type==="run"&&w.km?w.km*6.5:w.type==="gym"?60:30);return min*(w.rpe||RPE_DEF[w.type]||4)*(w.type==="gym"?0.8:1)}
+const ago=k=>k===1?"gestern":"vor "+k+" Tagen";
+const isQuality=w=>w.type==="run"&&((w.rpe||0)>=6||!!w.test);
+function guessSess(w){const ex=w.ex||[];if(ex.length){const legs=ex.filter(e=>exGroups(e.name).includes("beine")).length;if(legs>=Math.max(2,ex.length/2))return"beine";
+    const c={};for(const e of ex){const s=sessionFor(e.name);if(s)c[s]=(c[s]||0)+1}const best=Object.keys(c).sort((a,b)=>c[b]-c[a])[0];if(best&&!w.session)return best}
+  return w.session||"mix"}
+function firstLog(){return SUGC.fl!==undefined?SUGC.fl:(SUGC.fl=Object.keys(S.days).filter(k=>(S.days[k].workouts||[]).length).sort()[0]||null)}
+/* Ein Tag, wie er für die Steuerung zählt: Eintrag geht vor, für heute/Zukunft ohne Eintrag zählt der Vorschlag */
+function effDay(d,sim,today){
+  const logged=hasDay(d)?S.days[d].workouts||[]:[];const s=sim[d];
+  const lr=logged.filter(w=>w.type==="run"),lg=logged.filter(w=>w.type==="gym");
+  const e={km:lr.reduce((a,w)=>a+(w.km||0),0),longKm:Math.max(0,...lr.map(w=>w.km||0)),qual:lr.some(isQuality),hard:isHardDay(d),gym:lg.map(guessSess),load:0,active:false};
+  for(const w of logged){e.load+=wLoad(w);if(w.type!=="walk"&&w.type!=="gym")e.active=true}
+  if(s&&d>=today){
+    if(!lr.length&&s.km>0){e.km=s.km;e.longKm=s.km;e.qual=s.kind==="key";e.hard=e.hard||s.hard;e.load+=s.km*6.5*(s.kind==="key"?6.5:s.kind==="long"||s.kind==="b2b"?4:3.5);e.active=true}
+    if(!lg.length&&s.gym){e.gym=[s.gym.id];e.load+=s.gym.id==="prehab"?45:240}
   }
-  return out;
+  return e}
+function weekCtx(mon,E){
+  const p0=planFor(mon);if(!p0.wk)return null;
+  const pl=[...Array(7)].map((_,i)=>planFor(addDays(mon,i)));
+  const planSum=p0.sum,planLong=pl[5].run.km,fl=firstLog();let chronic=null,lr=0;
+  if(fl){const from=addDays(mon,-28),st=fl>from?fl:from,cov=Math.round((parseD(mon)-parseD(st))/864e5);
+    if(cov>=14){let k=0;for(let d=st;d<mon;d=addDays(d,1)){const e=E(d);k+=e.km;lr=Math.max(lr,e.longKm)}chronic=k/(cov/7)}}
+  let target=planSum,longKm=planLong,basis;
+  if(p0.wk===41)basis="Rennwoche: der Plan gilt genau so.";
+  else if(chronic==null)basis="Noch unter 2 Wochen Verlauf in der App, deshalb gilt erstmal der Plan. Danach richte ich die Woche nach deinen Einträgen.";
+  else{const cap=Math.max(chronic*1.15,chronic+5,15);target=Math.min(planSum,cap);
+    longKm=Math.min(planLong,lr>0?Math.max(lr*1.15,lr+2):10,Math.max(8,target*0.5));
+    basis=chronic<planSum*0.9?"Du bist zuletzt Ø "+fmt(chronic,0)+" km pro Woche gelaufen. Mehr als etwa 15 % Steigerung pro Woche erhöht das Verletzungsrisiko, deshalb führe ich dich schrittweise zurück zum Plan."
+      :"Du liegst mit Ø "+fmt(chronic,0)+" km pro Woche im Plan. Es gilt der Plan, Extra-km rechne ich auf die Woche an."}
+  target=Math.round(target);longKm=Math.round(longKm*2)/2;
+  const keys=pl.map((p,i)=>p.run.kind==="key"?{key:p.run.key,km:p.run.km,dow:i}:null).filter(Boolean);
+  return{mon,wk:p0.wk,planSum,planLong,target,longKm,chronic,lr,keys,pl,basis}}
+function planDay(ds,E,W,today){
+  const p=planFor(ds),z=zones(),why=[],gymWhy=[];
+  const d=hasDay(ds)?day(ds):null;
+  const amp=ds===today&&d?ampelOf(d.check,ds):null;const R=ds===today&&d?readiness(ds):null;
+  let kind="rest",km=0,key=null,extra={},longDay=null,wk=null;
+  const y=addDays(ds,-1),ey=E(y),fl=firstLog();
+  // Rückblick: Serie ohne Ruhetag, Tage seit letztem Lauf, akute vs. chronische Last
+  let streak=0;for(let k=1;k<=10;k++){if(E(addDays(ds,-k)).active)streak++;else break}
+  let since=null;for(let k=1;k<=28;k++){if(E(addDays(ds,-k)).km>0){since=k;break}}
+  if(since==null&&fl&&fl<addDays(ds,-14))since=29;
+  const realGap=since==null?0:Math.round((parseD(ds<today?ds:today)-parseD(addDays(ds,-since)))/864e5)-1;
+  let ak=0,akR=0,ck=0,al=0,cl=0,runs7=0,cov=0;
+  for(let k=1;k<=28;k++){const x=addDays(ds,-k),e=E(x);if(k<=7){ak+=e.km;if(x<today)akR+=e.km;al+=e.load;if(e.km>0)runs7++}else if(fl&&x>=fl){ck+=e.km;cl+=e.load;cov++}}
+  const cw=cov/7,acwr=cw>=1&&ck/cw>8&&akR>=0.4*ak?ak/(ck/cw):null,lacwr=cw>=1&&cl>0?al/(cl/cw):null;
+  if(W&&p.wk){
+    const dow=p.dow;let done=0,qual=0,longDone=false;
+    for(let x=W.mon;x<ds;x=addDays(x,1)){const e=E(x);done+=e.km;if(e.qual)qual++;if(e.longKm>=6&&e.longKm>=Math.min(14,W.longKm*0.75))longDone=true}
+    wk={...W,done,qual};
+    if(p.race){kind="race";km=100}
+    else{
+      if(!longDone&&W.pl[5].run.kind==="long"){if(dow<=5)longDay=5;else if(dow===6&&!ey.hard&&ey.km===0)longDay=6}
+      const rem=[];for(let j=dow;j<7;j++){const r=W.pl[j].run;if(j!==longDay&&r.km>0&&r.kind!=="long"&&r.kind!=="walk")rem.push(j)}
+      const longNow=longDay!=null?Math.round(W.longKm*(longDay===6?0.85:1)*2)/2:0;
+      const budget=W.target-done-longNow,planRest=rem.reduce((a,j)=>a+W.pl[j].run.km,0);
+      const f=W.wk===41?1:planRest>0?clamp(budget/planRest,0.5,1.1):1;
+      const pr=p.run;
+      if(dow===longDay){kind="long";km=longNow;
+        if(longDay===6)why.push("Der Long Run von gestern fehlt: heute nachholen, etwas kürzer und ohne zweiten langen Tag.");
+        else if(km<W.planLong-0.4)why.push("Long Run "+fmt(km,km%1?1:0)+" statt "+W.planLong+" km: "+(W.lr>0?"dein längster Lauf in den letzten 4 Wochen waren "+fmt(W.lr,1)+" km, mehr als etwa +15 % auf einmal überlastet Sehnen und Knochen.":"du hast zuletzt keinen längeren Lauf eingetragen, deshalb erst mal moderat."))}
+      else if(rem.includes(dow)){kind=pr.kind;key=pr.key;extra={hilly:pr.hilly};km=Math.round(pr.km*f*2)/2;
+        if(budget<=0&&W.wk!==41){kind="recovery";key=null;km=Math.min(km,5);why.push("Wochenziel ("+W.target+" km) schon erreicht: heute nur kurz und sehr locker.")}
+        else if(f<0.92)why.push("Angepasst an dein Wochenziel von "+W.target+" km (Plan "+W.planSum+" km)"+(done>0?", "+fmt(done,1)+" km hast du schon.":"."));
+        else if(f>1.05)why.push("Etwas mehr als im Plan, damit du auf dein Wochenziel von "+W.target+" km kommst.")}
+      else if(pr.kind==="long"&&longDone)why.push("Den Long Run hast du diese Woche schon gemacht: heute lauffrei.");
+      else if(pr.kind==="walk"){kind="walk"}
+      // Schlüsseleinheiten: wandern, wenn verpasst; fallen weg, wenn schon gemacht
+      const pend=W.keys.slice(qual);const tomorrowLong=longDay!=null&&dow+1===longDay;
+      if(kind==="key"&&!pend.length){kind="easy";key=null;why.push("Eine harte Einheit hast du diese Woche schon gemacht: heute locker.")}
+      else if(kind==="key"&&pend[0].key!==key)key=pend[0].key;
+      else if(pend.length&&pend[0].dow<dow&&(kind==="easy"||kind==="strides")&&dow<=3&&!tomorrowLong){kind="key";key=pend[0].key;km=Math.max(km,Math.round(pend[0].km*Math.min(1,f)*2)/2);why.push("Die Schlüsseleinheit vom "+WDL[pend[0].dow]+" fehlt noch: heute nachholen.")}
+      if(kind==="key"&&ey.hard){kind="easy";key=null;why.push("Gestern war hart: heute locker, die Schlüsseleinheit kommt später (nie zwei harte Tage hintereinander).")}
+    }
+  }
+  else if(p.pre){const dw=dowOf(ds);if(dw===1||dw===3||dw===5){kind="easy";km=6}}
+  else{kind="easy";km=5}
+  // Belastungs-Checks aus deinem Verlauf
+  if(kind!=="race"){
+    if(km>0&&since!=null&&since>=5&&realGap>=4){const f2=since>=10?0.5:0.7;km=Math.max(3,Math.round(km*f2*2)/2);if(kind==="key"||kind==="strides")kind="easy";
+      why.push((since>28?"Lange kein Lauf eingetragen":"Letzter Lauf vor "+since+" Tagen")+": Wiedereinstieg locker und "+(since>=10?"etwa halb so lang":"kürzer")+". Verpasste km holst du nicht nach.")}
+    else if(kind==="key"&&runs7<2&&fl&&fl<addDays(ds,-10)){kind="easy";key=null;why.push("Erst wieder zwei lockere Läufe, dann Tempo.")}
+    if(km>0&&streak>=6){kind="rest";km=0;why.push(streak+" Tage Ausdauer am Stück: heute ein Ruhetag, damit dein Körper die Reize verarbeitet.")}
+    if(km>0&&acwr!=null&&acwr>1.5){km=Math.round(km*0.7*2)/2;if(kind==="key"||kind==="strides")kind="easy";why.push("Letzte 7 Tage "+fmt(ak,0)+" km, das ist "+fmt(acwr,1)+"× dein Schnitt: heute locker und 30 % kürzer.")}
+    else if(km>0&&acwr!=null&&acwr>1.3){km=Math.round(km*0.85*2)/2;why.push("Letzte 7 Tage "+fmt(ak,0)+" km statt sonst Ø "+fmt(ck/cw,0)+": heute etwas kürzer.")}
+    else if(km>0&&lacwr!=null&&lacwr>1.5&&kind==="key"){kind="easy";why.push("Viel Gesamtbelastung in den letzten 7 Tagen (inkl. Gym und anderer Sport): Tempo heute raus.")}
+  }
+  // Ampel aus dem Morgen-Check
+  if(amp==="gelb"&&km>0){km=Math.round(km*0.7*2)/2;if(kind==="key"||kind==="strides")kind="easy";why.push("Ampel gelb"+(R&&R.why.length?" ("+R.why.join(", ")+")":"")+": alles locker, Umfang −30 %.")}
+  if(amp==="rot"){kind="rest";km=0;why.push(R&&R.rot?"HRV deutlich unten und Ruhepuls deutlich oben: oft ein Zeichen, dass ein Infekt kommt. Heute Pause.":"Ampel rot: Pause. Hält es 3 Tage an, zum Arzt oder Physio.")}
+  if(amp==="grün"&&R&&R.good&&kind==="key")why.push("Recovery grün: gute Voraussetzungen für die Schlüsseleinheit.");
+  const knee=d&&d.check.knee;
+  if(knee>=3&&knee<5&&km>0)why.push("Knie "+knee+"/10: Alternative wäre 40 min locker Rad oder Schwimmen.");
+  if(km<3&&km>0&&kind!=="race"){kind="rest";km=0}
+  // widersprüchliche Begründungen aufräumen (z. B. erst nachgeholt, dann wegen Wiedereinstieg doch locker)
+  for(let i=why.length-1;i>=0;i--){const w=why[i];if((kind!=="key"&&/fehlt noch: heute nachholen/.test(w))||(/Wiedereinstieg|30 % kürzer|Ruhetag/.test(why.join(" "))&&/^(Etwas mehr als im Plan|Angepasst an dein Wochenziel)/.test(w)))why.splice(i,1)}
+  if((kind==="long"||kind==="b2b")&&km<10)kind="easy";
+  const run=runDesc(kind,key,km,z,extra);
+  // Kraft: Rotation nach "am längsten her", nicht nach festem Wochentag
+  let gym=null;
+  if(amp!=="rot"&&p.wk&&!p.race){
+    const sinceS=s=>{for(let k=1;k<=28;k++)if(E(addDays(ds,-k)).gym.includes(s))return k;return 99};
+    const main=x=>E(x).gym.some(g=>g!=="prehab");
+    const upper=["push","pull","mix"].map(s=>[s,sinceS(s)]).sort((a,b)=>b[1]-a[1]);
+    const longToday=kind==="long"||(kind==="b2b"&&km>=15),longTomorrow=longDay!=null&&p.dow+1===longDay,yLong=ey.longKm>=20;
+    const legsBlock=W&&W.pl[0].gymNote?W.pl[0].gymNote:p.wk===41?"Rennwoche: keine schweren Beine.":null;
+    const legsSince=sinceS("beine"),legsOk=!legsBlock&&!longToday&&!longTomorrow&&!yLong&&kind!=="key";
+    const slot=p.gym;let g=null;
+    if(longToday){if(slot)gymWhy.push("Heute langer Lauf: kein Gym.")}
+    else if(slot==="beine"){
+      if(legsOk&&legsSince>=5)g="beine";
+      else{const u=upper.find(x=>x[1]>=4);g=u?u[0]:null;
+        gymWhy.push(legsBlock?legsBlock:legsSince<5?"Beine hast du "+ago(legsSince)+" gemacht.":"Beine passen heute nicht (langer Lauf in der Nähe).");if(g)gymWhy.push("Deshalb heute "+GYM[g].name+".")}}
+    else if(slot&&slot!=="prehab"){
+      if(legsOk&&legsSince>=9&&legsSince<99){g="beine";gymWhy.push("Beine sind seit "+legsSince+" Tagen offen: heute nachholen.")}
+      else if(sinceS(slot)>=4)g=slot;
+      else{const u=upper.find(x=>x[1]>=4);
+        if(u){g=u[0];gymWhy.push(GYM[slot].name+" hast du "+ago(sinceS(slot))+" gemacht, deshalb heute "+GYM[g].name+".")}
+        else gymWhy.push("Alle Oberkörper-Einheiten in den letzten Tagen erledigt: heute keine Kraft.")}}
+    else if(!main(y)&&kind!=="key"&&kind!=="long"){const soon=s=>[1,2].some(k=>planFor(addDays(ds,k)).gym===s);
+      if(soon("beine")||upper.some(x=>soon(x[0])&&x[1]>=7)){}else
+      if(legsOk&&legsSince>=9&&legsSince<99){g="beine";gymWhy.push("Beine sind seit "+legsSince+" Tagen offen: heute nachholen.")}
+      else if(upper[0][1]>=7&&upper[0][1]<99){g=upper[0][0];gymWhy.push(GYM[g].name+" ist seit "+upper[0][1]+" Tagen offen: heute nachholen.")}
+    }
+    if(!g&&slot==="prehab")g="prehab";
+    if(g&&g!=="prehab"&&main(y)&&main(addDays(ds,-2))){gymWhy.push("Zwei Gym-Tage am Stück: heute Pause, nur Prehab.");g="prehab"}
+    if(g){
+      const tpl=GYM[g];const back=g!=="prehab"&&Math.min(legsSince,...upper.map(x=>x[1]))>=10&&fl&&fl<addDays(ds,-10);
+      let adj=(p.deload?-1:0)+(amp==="gelb"?-1:0)+(back?-1:0);
+      const exs=tpl.ex.map(e=>{let s=e[1]+adj;if(tpl.leg&&p.legsLate)s=Math.min(s,2);return prescribe(e,Math.max(1,s))});
+      if(p.deload&&g!=="prehab")gymWhy.push("Entlastungswoche: 1 Satz weniger.");
+      if(back)gymWhy.push("Nach über einer Woche ohne Gym: 1 Satz weniger, Gewichte wie zuletzt.");
+      gym={id:g,name:tpl.name,ex:exs,rir:tpl.leg?"RIR 2–3, nie bis zum Muskelversagen":g==="prehab"?"locker, saubere Technik":"RIR 0–2"};
+    }
+  }
+  if(p.gymNote&&!gymWhy.includes(p.gymNote))gymWhy.push(p.gymNote);
+  const hard=kind==="key"||kind==="long"&&km>=20||kind==="race";
+  return{ds,p,kind,km,key,run,why,gym,gymWhy,hard,amp,loggedRuns:runsOf(ds),loggedGym:gymOf(ds),easyPace:easyPaceRecent(ds),z,week:wk};
 }
-
+/* Vorschläge für n Tage ab from. Für Tage in der Zukunft wird ab heute durchgerechnet. */
+function suggest(from,n=3){
+  const today=todayISO();let start=from,skip=0;
+  if(from>today){const gap=Math.round((parseD(from)-parseD(today))/864e5);if(gap<=21){start=today;skip=gap}}
+  const ck=today+"|"+start+"|"+(n+skip);if(SUGC[ck])return SUGC[ck].slice(skip,skip+n);
+  const sim={},WC={},E=x=>effDay(x,sim,today),out=[];
+  for(let i=0;i<n+skip;i++){const ds=addDays(start,i),mon=addDays(ds,-dowOf(ds));if(!(mon in WC))WC[mon]=weekCtx(mon,E);const s=planDay(ds,E,WC[mon],today);sim[ds]=s;out.push(s)}
+  SUGC[ck]=out;return out.slice(skip,skip+n)}
 /* ================= Ernährung: Ziele & Summen ================= */
 function targetsFor(ds){
   const p=planFor(ds),w=S.settings.weight||78,d=hasDay(ds)?day(ds):null;
@@ -488,6 +593,7 @@ const cap=s=>s?s[0].toUpperCase()+s.slice(1):"";
 
 /* ================= Rendering ================= */
 function render(){
+  SUGC={};
   const isToday=CUR===todayISO();
   $("#dTitle").textContent=isToday?"Heute":long(CUR);
   const p=planFor(CUR),toRace=Math.round((parseD(RACE)-parseD(CUR))/864e5);
@@ -579,7 +685,7 @@ function workoutLine(w){
 function trainingCard(s,withActions){
   const done=s.loggedRuns.length,doneGym=s.loggedGym.length;
   const c=h("section",{class:"sec train"});
-  c.append(h("div",{class:"sec-h"},h("h2",{},s.ds===todayISO()?"Vorschlag für heute":"Vorschlag für "+short(s.ds)),h("span",{class:"muted tiny"},"Plan als Leitlinie, du entscheidest")));
+  c.append(h("div",{class:"sec-h"},h("h2",{},s.ds===todayISO()?"Vorschlag für heute":"Vorschlag für "+short(s.ds)),h("span",{class:"muted tiny"},"aus Plan + deinem Training")));
   if(s.p.note)c.append(h("div",{class:"tiny muted"},"Diese Woche: "+s.p.note));
   const runBlock=h("div",{class:"tb"},h("div",{class:"tb-t"},done?"✓ ":"",s.run.title),h("div",{class:"muted small"},s.run.detail));
   if(s.easyPace&&(s.kind==="easy"||s.kind==="long"))runBlock.append(h("div",{class:"muted tiny"},"Deine lockeren Läufe zuletzt: Ø "+pace(s.easyPace)+" /km"));
@@ -943,6 +1049,17 @@ function gapSec(){
   return s}
 
 /* ---------- Training ---------- */
+function weekSec(s){const W=s.week;if(!W)return null;
+  const GN={push:"Push",pull:"Pull",mix:"Mix",beine:"Beine",prehab:"Prehab"};const cnt={};
+  for(let k=0;k<7;k++)for(const w of gymOf(addDays(s.ds,-k))){const g=guessSess(w);cnt[g]=(cnt[g]||0)+1}
+  const row=(l,v)=>h("div",{class:"pr"},h("div",{},l),h("div",{class:"num pr-v"},v));
+  const changed=W.target!==W.planSum||W.longKm!==W.planLong;
+  return sec("Deine Woche",h("span",{class:"muted tiny"},"Woche "+W.wk+"/41"),
+    row("Plan",W.planSum+" km · Long Run "+(W.wk===41?"Rennen":W.planLong+" km")),
+    row(changed?"Für dich angepasst":"Für dich",W.target+" km · Long Run "+(W.wk===41?"Rennen":fmt(W.longKm,W.longKm%1?1:0)+" km")),
+    row("Bis gestern gelaufen",fmt(W.done,1)+" km · harte Einheiten "+W.qual+"/"+W.keys.length),
+    row("Kraft letzte 7 Tage",Object.keys(GN).map(g=>GN[g]+(cnt[g]?" ✓":" –")).join(" · ")),
+    h("p",{class:"muted tiny",style:"margin-top:6px"},W.basis));}
 function renderTraining(){
   const root=$("#v-training");root.replaceChildren();
   root.append(quickInput("training"));
@@ -955,10 +1072,11 @@ function renderTraining(){
         ed?wEditor(w,re=>{save();if(re)render()}):w.ex&&w.ex.length?exTable(w.ex):null)}))
       :h("p",{class:"muted small"},"Noch nichts eingetragen. Sprich oben rein, was du gemacht hast, egal ob es zum Vorschlag passt."),
     addUnitRow(w=>{w.id=uid();day(CUR).workouts.push(w);EDIT=w.id;save();render()})));
-  const sg=suggest(CUR,3);
+  const sg=suggest(CUR,7);
   root.append(trainingCard(sg[0],true));
   root.append(checkSec());
-  root.append(sec("Vorschläge nächste Tage",null,sg.slice(1).map(s=>h("div",{class:"day-s"},h("div",{class:"muted small"},long(s.ds)),h("div",{class:"tb-t"},s.run.title),h("div",{class:"muted tiny"},s.run.detail),s.gym?h("div",{class:"small",style:"margin-top:2px"},s.gym.name):null))));
+  const ws0=weekSec(sg[0]);if(ws0)root.append(ws0);
+  root.append(sec("Vorschläge nächste Tage",h("span",{class:"muted tiny"},"passen sich an, sobald du einträgst"),sg.slice(1).map(s=>h("div",{class:"day-s"},h("div",{class:"muted small"},long(s.ds)),h("div",{class:"tb-t"},s.run.title),h("div",{class:"muted tiny"},s.run.detail),s.gym?h("div",{class:"small",style:"margin-top:2px"},"Kraft: "+s.gym.name):null,s.why.concat(s.gymWhy.filter(w=>w!==s.p.gymNote)).length?h("div",{class:"tiny why-1"},s.why.concat(s.gymWhy.filter(w=>w!==s.p.gymNote))[0]):null))));
   const p=planFor(CUR);const mon=addDays(CUR,-(p.wk?p.dow:dowOf(CUR)));
   const wk=h("div",{class:"week"});let tot=0;
   for(let i=0;i<7;i++){const ds=addDays(mon,i),wl=hasDay(ds)?day(ds).workouts:[];tot+=kmOf(ds);
@@ -969,7 +1087,7 @@ function renderTraining(){
   root.append(sec("Deine Zonen",h("span",{class:"muted tiny"},z.src),h("div",{class:"zones"},[["R Regeneration","RPE 2–3",zoneTxt(z.R)],["GA Grundlage","RPE 3–4",zoneTxt(z.GA)],["M Steady","RPE 5",zoneTxt(z.M)],["S Schwelle","RPE 6–7",zoneTxt(z.S)],["Berg","RPE 7–8","nur RPE"]].map(r=>h("div",{class:"zr"},h("span",{},r[0]),h("span",{class:"muted"},r[1]),h("span",{class:"num"},r[2])))),
     h("p",{class:"muted tiny"},"RPE geht vor Pace. Nach einem 5-km-Test („5 km Test in 24:30“) rechne ich die Zonen neu.")));
   const open=OPEN.has("plan");
-  root.append(sec("Dein Plan (Leitlinie)",h("button",{class:"link",onclick:()=>{open?OPEN.delete("plan"):OPEN.add("plan");render()}},open?"Zuklappen":"Anzeigen"),open?planTable():h("p",{class:"muted tiny"},"41 Wochen bis zum 100er. Die Vorschläge richten sich danach, passen sich aber an das an, was du wirklich trainierst.")));
+  root.append(sec("Dein Plan (Leitlinie)",h("button",{class:"link",onclick:()=>{open?OPEN.delete("plan"):OPEN.add("plan");render()}},open?"Zuklappen":"Anzeigen"),open?planTable():h("p",{class:"muted tiny"},"41 Wochen bis zum 100er. Der Plan gibt Struktur und Ziel vor. Wie viel an welchem Tag dran ist, rechne ich aus dem, was du wirklich trainiert hast.")));
   root.append(gapSec());
 }
 function logForm(){
