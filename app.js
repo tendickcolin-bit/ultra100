@@ -1253,16 +1253,16 @@ function riskSec(ds){const I=injuryRisk(ds);
 const RUN_COL={tempo:"#d12f2f",long:"#1f6feb",easy:"#1a8f4c"};
 function runKind(w){const pc=w.km>0&&w.min?w.min*60/w.km:null;if(pc&&pc<=300)return"tempo";if((w.km||0)>=10)return"long";return"easy"}
 function runChartSec(today){
-  const runs=[];for(let i=55;i>=0;i--){const ds=addDays(today,-i);for(const w of runsOf(ds))if(w.km>0)runs.push({ds,w,k:runKind(w)})}
+  // alle Läufe bis heute, die letzten 40 (unabhängig vom Datum)
+  const runs=[];for(const ds of Object.keys(S.days).filter(k=>k<=today).sort())for(const w of runsOf(ds))if((+w.km||0)>0)runs.push({ds,w:{...w,km:+w.km,min:+w.min||0},k:runKind({km:+w.km,min:+w.min||0})});
   const lg=h("div",{class:"legend tiny muted"},h("span",{},h("i",{style:"background:"+RUN_COL.long}),"lang ≥ 10 km"),h("span",{},h("i",{style:"background:"+RUN_COL.tempo}),"Tempo ≤ 5:00 /km"),h("span",{},h("i",{style:"background:"+RUN_COL.easy}),"Training"));
-  const s_=sec("Läufe",h("span",{class:"muted tiny"},"letzte 8 Wochen"),lg);
-  if(!runs.length){s_.append(h("p",{class:"muted small"},"Noch keine Läufe in den letzten 8 Wochen eingetragen."));return s_}
+  const s_=sec("Läufe",h("span",{class:"muted tiny"},runs.length>40?"letzte 40 Läufe":runs.length+" Läufe"),lg);
   const data=runs.slice(-40),W=360,H=150,L=34,R=4,T=8,B=20,iw=W-L-R,ih=H-T-B;
   const st=[1,2,5,10,15,20,25,50].find(x=>x*3>=Math.max(1,...data.map(d=>d.w.km))*1.05)||50,mx=st*3;
   const NS="http://www.w3.org/2000/svg",s=document.createElementNS(NS,"svg");s.setAttribute("viewBox",`0 0 ${W} ${H}`);
   const add=(t,a,txt)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(txt!=null)e.textContent=txt;s.append(e);return e};
   for(let i=0;i<=3;i++){const y=T+ih-ih*i/3;add("line",{x1:L,x2:W-R,y1:y,y2:y,stroke:"var(--line)","stroke-width":1});add("text",{x:L-4,y:y+3,"text-anchor":"end",class:"ax"},fmt(mx*i/3))}
-  const bw=iw/Math.max(data.length,7),cap=h("div",{class:"muted tiny cap"},"Tipp auf einen Balken"),step=Math.ceil(data.length/8);
+  const bw=iw/Math.max(data.length,7),cap=h("div",{class:"muted tiny cap"},data.length?"Tipp auf einen Balken":"Noch keine Läufe mit km eingetragen. Sobald du einen Lauf speicherst, erscheint er hier als Balken."),step=Math.ceil(data.length/8);
   const nm={tempo:"Tempo",long:"Langer Lauf",easy:"Training"};
   data.forEach((d,i)=>{const x=L+i*bw,bh=ih*d.w.km/mx,w=Math.max(3,bw-3),y=T+ih-bh,r=Math.min(3,w/2,bh);
     add("path",{d:`M${x+1.5},${T+ih}V${y+r}Q${x+1.5},${y} ${x+1.5+r},${y}H${x+1.5+w-r}Q${x+1.5+w},${y} ${x+1.5+w},${y+r}V${T+ih}Z`,fill:RUN_COL[d.k]});
@@ -1270,7 +1270,7 @@ function runChartSec(today){
     const hit=add("rect",{x,y:T,width:bw,height:ih,fill:"transparent"});
     hit.addEventListener("click",()=>cap.textContent=short(d.ds)+": "+nm[d.k]+" · "+fmt(d.w.km,1)+" km"+(d.w.min?" · "+pace(d.w.min*60/d.w.km)+" /km":" · ohne Zeit"))});
   const cnt=k=>data.filter(d=>d.k===k).length;
-  s_.append(h("div",{class:"chart"},s,cap),h("p",{class:"muted tiny"},cnt("long")+" lang · "+cnt("tempo")+" Tempo · "+cnt("easy")+" Training. Ein Lauf ab 10 km mit Tempo-Pace zählt als Tempo."));
+  s_.append(h("div",{class:"chart"},s,cap),...(data.length?[h("p",{class:"muted tiny"},cnt("long")+" lang · "+cnt("tempo")+" Tempo · "+cnt("easy")+" Training. Ein Lauf ab 10 km mit Tempo-Pace zählt als Tempo.")]:[]));
   return s_;
 }
 /* Makro-Diagramm: Kalorien, Protein, Kohlenhydrate als Linien in % vom Tagesziel, damit alle drei auf eine Achse passen. */
@@ -1294,13 +1294,15 @@ function macroChartSec(days){
   ev.forEach((e,i)=>{if(ev.length<=9||i%2===0)add("text",{x:X(i),y:H-5,"text-anchor":"middle",class:"ax"},parseD(e.ds).getDate()+".");
     const hit=add("rect",{x:L+iw*i/ev.length,y:T,width:iw/ev.length,height:ih,fill:"transparent"});
     hit.addEventListener("click",()=>cap.textContent=short(e.ds)+": "+(e.has?MAC.map(m=>fmt(e.T[m[0]])+" / "+fmt(e.tg[m[0]])+" "+m[2]+" "+(m[0]==="kcal"?"":m[1])).join(" · "):"nichts eingetragen"))});
-  if(!ev.some(e=>e.has))s_.append(h("p",{class:"muted small"},"Noch keine Mahlzeiten in den letzten 14 Tagen eingetragen."));
-  else s_.append(h("div",{class:"chart"},s,cap));
+  if(!ev.some(e=>e.has))cap.textContent="Noch keine Mahlzeiten in den letzten 14 Tagen eingetragen.";
+  s_.append(h("div",{class:"chart"},s,cap));
   return s_;
 }
 function renderFortschritt(){
   const root=$("#v-fortschritt");root.replaceChildren();
   const today=CUR,p=planFor(today);
+  // Diagramme ganz oben: Läufe + Makros
+  root.append(runChartSec(today),macroChartSec(Array.from({length:14},(_,i)=>addDays(today,i-13))));
   root.append(readySec(today),riskSec(today));
   // Langfristig: Ziel 100 km
   const MS=[["2027-04-03",32,"32 km Meilenstein"],["2027-07-10",42,"Marathon im Training"],["2027-07-31",50,"Generalprobe 50 km"],[RACE,100,"100 km Solo"]];
@@ -1336,10 +1338,7 @@ function renderFortschritt(){
     short_.append(progRow(r.n,fmt(r.last.e1,1)+" kg",pct!=null?h("span",{class:pct>=0?"ok-t":"warn-t"},(pct>=0?"+":"−")+fmt(Math.abs(pct),1)+" %"):h("span",{class:"muted"},"erster Wert"),"zuletzt "+r.last.reps+" × "+kgf(r.last.kg)+" kg am "+short(r.last.ds)))}
   root.append(short_);
   root.append(scoreSec());
-  // Diagramme: Läufe + Makros
-  root.append(runChartSec(today));
   const days=[];for(let i=13;i>=0;i--)days.push(addDays(CUR,-i));
-  root.append(macroChartSec(days));
   // Gewicht (nur Zahl, kein Diagramm)
   const pts=Object.keys(S.days).filter(k=>S.days[k].check&&S.days[k].check.weight&&k<=CUR).sort().slice(-60).map(k=>({ds:k,v:S.days[k].check.weight}));
   const wsec=sec("Gewicht",h("span",{class:"muted tiny"},"Ziel bis Mai: +0,25–0,5 kg/Monat"));
