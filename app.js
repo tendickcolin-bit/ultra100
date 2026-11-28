@@ -942,7 +942,8 @@ function ownFoodForm(onDone,pre={}){
 function renderErnaehrung(){
   const root=$("#v-ernaehrung");root.replaceChildren();
   root.append(quickInput("food"));if(PREVIEW&&PREVIEW.where==="ernaehrung")root.append(previewBox());
-  root.append(h("button",{class:"btn wide",onclick:()=>openPicker(f=>{PREVIEW={text:"",meal:guessMeal(),items:[{fid:f.id,g:f.p||f.u}],workouts:[],check:{},supps:{},unknown:[],where:"ernaehrung"};render()})},"Lebensmittel suchen"));
+  const toPrev=f=>{PREVIEW={text:"",meal:guessMeal(),items:[{fid:f.id,g:f.p||f.u}],workouts:[],check:{},supps:{},unknown:[],where:"ernaehrung"};render()};
+  root.append(h("div",{class:"btn-row two"},h("button",{class:"btn",onclick:()=>openPicker(toPrev)},"Suchen"),h("button",{class:"btn",onclick:()=>{openPicker(toPrev);$("#pkScan").click()}},"Barcode scannen")));
   root.append(nutriSummary());root.append(suppSec());const w=warnSec();if(w)root.append(w);
   const d=hasDay(CUR)?day(CUR):{entries:[]};
   const byMeal={};for(const e of d.entries)(byMeal[e.meal||"snack"]??=[]).push(e);
