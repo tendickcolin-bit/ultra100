@@ -1,4 +1,5 @@
 "use strict";
+if(window.AUTH_GATE)throw new Error("Anmeldung läuft, App startet danach");
 /* ================= Hilfen ================= */
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -23,8 +24,12 @@ const NI=Object.fromEntries(NK.map((k,i)=>[k,i]));
 const NMETA=Object.fromEntries(NUTR.map(n=>[n[0],{key:n[0],name:n[1],unit:n[2],t:n[3],ul:n[4],g:n[5],d:n[6]}]));
 
 /* ================= Speicher (nur auf dem Gerät) ================= */
-const KEY="ultra100.v2";
-function freshState(){return{days:{},custom:[],settings:{weight:78,p5:null,p5date:null,supps:SUPP_DEFAULT.map(s=>({...s,active:!s.optional}))}}}
+/* Mit Konto: eigener Schlüssel je Konto, ohne Konto wie bisher */
+const KEY=window.ACCT?ACCT.key:"ultra100.v2";
+function freshState(){
+  // Neues Konto: nichts vorausgefüllt, Einrichtung fragt Profil, Ziele und Supplements ab
+  if(window.ACCT)return{days:{},custom:[],settings:{weight:null,p5:null,p5date:null,plan:"none",onboarded:false,mig6:true,mig7:true,supps:SUPP_DEFAULT.map(({min,...s})=>({...s,active:false}))}};
+  return{days:{},custom:[],settings:{weight:78,p5:null,p5date:null,supps:SUPP_DEFAULT.map(s=>({...s,active:!s.optional}))}}}
 let S;
 try{S=JSON.parse(localStorage.getItem(KEY))||freshState()}catch(e){S=freshState()}
 S.days??={};S.custom??=[];S.learn??={};S.settings??=freshState().settings;S.settings.supps??=freshState().settings.supps;
@@ -38,12 +43,14 @@ let HASH={};function stamp(){const now=Date.now();for(const[k,d]of Object.entrie
   for(const k of Object.keys(S.days))if(HASH[k]===undefined)HASH[k]=JSON.stringify((({u,...r})=>r)(S.days[k]))}
 function rehash(){HASH={};stamp()}
 function save(){SUGC={};clearTimeout(saveT);saveT=setTimeout(()=>{try{for(const k of Object.keys(S.days))if(HASH[k]===undefined){HASH[k]=dayWeight(S.days[k])?"":JSON.stringify((({u,...r})=>r)(S.days[k]));}stamp();localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast("Speichern fehlgeschlagen: Speicher voll?")}syncSoon()},150)}
+const NOPLAN=()=>S.settings.plan==="none";
 function day(ds){const d=S.days[ds]||(S.days[ds]={});d.entries??=[];d.workouts??=[];d.check??={};d.supps??={};return d}
 const hasDay=ds=>!!S.days[ds];
 function foodById(id){return FOODS[id]||S.custom.find(c=>c.id===id)||null}
 
 /* ================= Plan ================= */
 function planFor(ds){
+  if(NOPLAN())return{pre:true,none:true};
   const diff=Math.round((parseD(ds)-START)/864e5);
   if(diff<0)return{pre:true};const wk=Math.floor(diff/7)+1;if(wk>41)return{post:true};
   const dow=diff%7,r=PLAN[wk-1],[key,di,mi,dn,sa,so,sum,note]=r;
@@ -290,9 +297,11 @@ function targetsFor(ds){
   const other=d?d.workouts.filter(x=>x.type==="swim"||x.type==="bike"||x.type==="other").reduce((a,x)=>a+(x.min||0),0):0;
   let t;
   // Basis: 3200 kcal, 200 g Protein, 400 g KH, ~90 g Fett. Trainingstage mehr KH.
-  const mk=(kcal,f,label)=>({kcal,p:200,f,c:Math.round((kcal-200*4-f*9)/4),label});
+  // Basis pro Konto: S.settings.kcal/prot (Einrichtung oder Vorgabe vom Admin). Ohne Angabe gelten 3200/200.
+  const B=S.settings.kcal||3200,P=S.settings.prot||200,sc=B/3200;
+  const mk=(kcal,f,label)=>{kcal=B+kcal-3200;f=Math.round(f*sc);return{kcal,p:P,f,c:Math.round((kcal-P*4-f*9)/4),label}};
   if(p.race)t={kcal:7000,p:170,c:1100,f:110,label:"Renntag"};
-  else if(p.carbLoad){const c=Math.round(9*w);t={kcal:200*4+c*4+80*9,p:200,c,f:80,label:"Carb-Loading"}}
+  else if(p.carbLoad){const c=Math.round(9*w);t={kcal:P*4+c*4+80*9,p:P,c,f:80,label:"Carb-Loading"}}
   else if(longRun&&km>=35)t=mk(6250,110,"Long Run 35–50 km");
   else if(longRun&&km>=20)t=mk(4800,100,"Long Run 20–30 km");
   else if(keyDay&&gym)t=mk(3800,90,"Schlüsseleinheit + Gym");
@@ -598,7 +607,8 @@ function render(){
   const isToday=CUR===todayISO();
   $("#dTitle").textContent=isToday?"Heute":long(CUR);
   const p=planFor(CUR),toRace=Math.round((parseD(RACE)-parseD(CUR))/864e5);
-  $("#dSub").textContent=(isToday?short(CUR)+" · ":"")+(p.wk?"Woche "+p.wk+"/41 · ":"")+(toRace>0?"noch "+toRace+" Tage bis zum 100er":"");
+  $("#dSub").textContent=(isToday?short(CUR)+" · ":"")+(p.wk?"Woche "+p.wk+"/41 · ":"")+(toRace>0&&!NOPLAN()?"noch "+toRace+" Tage bis zum 100er":"");
+  if(window.ACCT&&!S.settings.onboarded){$$("main.view").forEach(m=>{m.hidden=m.id!=="v-training";if(m.id!=="v-training")m.replaceChildren()});renderOnboarding();return}
   $$("main.view").forEach(m=>{if(m.id!=="v-"+VIEW)m.replaceChildren()});
   const v={training:renderTraining,ernaehrung:renderErnaehrung,fortschritt:renderFortschritt,longevity:renderLongevity,mehr:renderMehr}[VIEW];v();
 }
@@ -1118,7 +1128,7 @@ function renderTraining(){
   root.append(sec("Deine Zonen",h("span",{class:"muted tiny"},z.src),h("div",{class:"zones"},[["R Regeneration","RPE 2–3",zoneTxt(z.R)],["GA Grundlage","RPE 3–4",zoneTxt(z.GA)],["M Steady","RPE 5",zoneTxt(z.M)],["S Schwelle","RPE 6–7",zoneTxt(z.S)],["Berg","RPE 7–8","nur RPE"]].map(r=>h("div",{class:"zr"},h("span",{},r[0]),h("span",{class:"muted"},r[1]),h("span",{class:"num"},r[2])))),
     h("p",{class:"muted tiny"},"RPE geht vor Pace. Nach einem 5-km-Test („5 km Test in 24:30“) rechne ich die Zonen neu.")));
   const open=OPEN.has("plan");
-  root.append(sec("Dein Plan (Leitlinie)",h("button",{class:"link",onclick:()=>{open?OPEN.delete("plan"):OPEN.add("plan");render()}},open?"Zuklappen":"Anzeigen"),open?planTable():h("p",{class:"muted tiny"},"41 Wochen bis zum 100er. Der Plan gibt Struktur und Ziel vor. Wie viel an welchem Tag dran ist, rechne ich aus dem, was du wirklich trainiert hast.")));
+  if(!NOPLAN())root.append(sec("Dein Plan (Leitlinie)",h("button",{class:"link",onclick:()=>{open?OPEN.delete("plan"):OPEN.add("plan");render()}},open?"Zuklappen":"Anzeigen"),open?planTable():h("p",{class:"muted tiny"},"41 Wochen bis zum 100er. Der Plan gibt Struktur und Ziel vor. Wie viel an welchem Tag dran ist, rechne ich aus dem, was du wirklich trainiert hast.")));
 }
 function logForm(){
   const F=LOGFORM||(LOGFORM={type:"run"});
@@ -1303,7 +1313,7 @@ function renderFortschritt(){
   const today=CUR,p=planFor(today);
   // Diagramme ganz oben: Läufe + Makros
   root.append(runChartSec(today),macroChartSec(Array.from({length:14},(_,i)=>addDays(today,i-13))));
-  root.append(readySec(today),riskSec(today));
+  if(NOPLAN()){root.append(riskSec(today))}else root.append(readySec(today),riskSec(today));
   // Langfristig: Ziel 100 km
   const MS=[["2027-04-03",32,"32 km Meilenstein"],["2027-07-10",42,"Marathon im Training"],["2027-07-31",50,"Generalprobe 50 km"],[RACE,100,"100 km Solo"]];
   const next=MS.find(m=>m[0]>=today)||MS[3];
@@ -1317,7 +1327,7 @@ function renderFortschritt(){
   if(planDays>=3){goal.append(progRow("Kilometer (4 Wochen)",fmt(act4)+" km",h("span",{class:"muted"},"Plan "+fmt(planKm4)+" km"),act4>planKm4*1.2?"Deutlich über Plan: Verletzungsrisiko im Blick behalten.":act4<planKm4*0.7?"Unter Plan. Kein Problem, aber nicht auf einmal nachholen.":"Im Rahmen des Plans."));
     goal.append(progRow("Regelmäßigkeit",fmt(100*runDays/planDays)+" %",null,runDays+" von "+planDays+" Lauftagen im Plan gelaufen"))}
   else goal.append(progRow("Kilometer (4 Wochen)",fmt(act4)+" km",null,"Der Vergleich mit dem Plan startet nach der ersten Planwoche."));
-  root.append(goal);
+  if(!NOPLAN())root.append(goal);
   // Kurzfristig
   const a14=addDays(today,-13),b14=addDays(today,-27),b14e=addDays(today,-14);
   const short_=sec("Kurzfristig",h("span",{class:"muted tiny"},"letzte 14 Tage gegen die 14 davor"));
@@ -1497,10 +1507,10 @@ function renderLongevity(){
 
 
 /* ================= Sync über ein geheimes GitHub-Gist (kostenlos) ================= */
-const SKEY="ultra100.sync";let SY={};try{SY=JSON.parse(localStorage.getItem(SKEY))||{}}catch(e){SY={}}
+const SKEY="ultra100.sync";let SY={};try{SY=window.ACCT?{}:JSON.parse(localStorage.getItem(SKEY))||{}}catch(e){SY={}}
 const saveSY=()=>{try{localStorage.setItem(SKEY,JSON.stringify(SY))}catch(e){}};
 let syncT=null,SYNCING=false,SYNCMSG="";
-function syncSoon(){if(!SY.token)return;clearTimeout(syncT);syncT=setTimeout(()=>syncNow(false),4000)}
+function syncSoon(){if(window.ACCT){clearTimeout(syncT);syncT=setTimeout(()=>cloudSync(false),3000);return}if(!SY.token)return;clearTimeout(syncT);syncT=setTimeout(()=>syncNow(false),4000)}
 async function gh(path,opt={}){const r=await fetch("https://api.github.com"+path,{...opt,headers:{Authorization:"Bearer "+SY.token,Accept:"application/vnd.github+json","Content-Type":"application/json",...(opt.headers||{})},cache:"no-store"});
   if(r.status===401)throw new Error("Token ungültig oder abgelaufen");if(r.status===403||r.status===404&&path==="/gists")throw new Error("Token hat keine Gist-Berechtigung");if(!r.ok)throw new Error("GitHub antwortet mit "+r.status);return r.json()}
 const dayWeight=d=>(d.entries||[]).length+(d.workouts||[]).length+Object.keys(d.check||{}).length;
@@ -1513,6 +1523,7 @@ function mergeState(L,R){
   if((R.settings&&R.settings.u||0)>(L.settings.u||0))out.settings={...L.settings,...R.settings};
   return out}
 async function syncNow(manual){
+  if(window.ACCT)return cloudSync(manual);
   if(!SY.token||SYNCING)return;SYNCING=true;SYNCMSG="Synchronisiere …";if(VIEW==="mehr")render();
   try{
     if(!SY.gist){const list=await gh("/gists?per_page=100");const g=list.find(x=>x.description==="ultra100-sync"&&x.files["ultra100.json"]);
@@ -1538,23 +1549,138 @@ function syncSec(){
           h("li",{},"Bei „Expiration“ „No expiration“ wählen, nur „gist“ ist angehakt, unten „Generate token“."),h("li",{},"Den Token (ghp_…) kopieren, hier einfügen, „Verbinden“."),h("li",{},"Auf dem zweiten Gerät denselben Token einfügen. Fertig.")),
         h("label",{},"Token",t),h("button",{class:"btn primary wide",onclick:async()=>{const v=t.value.trim();if(!/^(ghp_|github_pat_)/.test(v)){toast("Das sieht nicht nach einem GitHub-Token aus");return}SY={token:v};saveSY();await syncNow(true);if(SYNCMSG.startsWith("Sync-Fehler")){toast(SYNCMSG);SY={};saveSY()}render()}},"Verbinden")))}
 
+/* ================= Konto (Supabase): Sync, Freischaltung, Admin, Einrichtung ================= */
+const prof=()=>window.ACCT&&ACCT.profile||null;
+function isAdmin(){const p=prof();return!!(p&&p.is_admin)}
+/* Funktionen, die der Admin pro Konto freischaltet. Ohne Konten (config.js leer) ist alles an. */
+function featureOn(f){if(!window.ACCT)return true;const p=prof();return!!(p&&(p.is_admin||(p.features||{})[f]))}
+const CSKEY=window.ACCT?"ultra100.sync."+ACCT.uid:"";
+function applyAssigned(p){const a=p&&p.assigned||{};if(!a.u||a.u<=(S.settings.asgU||0))return false;
+  for(const k of["plan","weight","kcal","prot"])if(a[k]!=null&&a[k]!=="")S.settings[k]=a[k];
+  S.settings.asgU=a.u;save();toast("Neue Vorgaben übernommen");return true}
+async function cloudSync(manual){
+  if(!window.ACCT||SYNCING)return;SYNCING=true;SYNCMSG="Synchronisiere …";if(VIEW==="mehr")render();
+  const oldP=JSON.stringify(prof());
+  try{
+    const p=await Cloud.profile();
+    const changed=applyAssigned(p);
+    if(!p||!(p.approved||p.is_admin)){SYNCMSG="Wartet auf Freischaltung. Bis dahin bleiben deine Daten nur auf diesem Gerät.";if(manual)toast(SYNCMSG);if(changed||JSON.stringify(prof())!==oldP||VIEW==="mehr")render();return}
+    const row=await Cloud.load();const R=row&&row.data;
+    const before=JSON.stringify(S);
+    if(R&&R.days){S=mergeState(S,R);S.days??={};S.custom??=[];S.learn??={};rehash();localStorage.setItem(KEY,JSON.stringify(S))}
+    const mine=JSON.stringify(S);
+    if(!R||mine!==JSON.stringify(mergeState(R,S)))await Cloud.store(S);
+    try{localStorage.setItem(CSKEY,String(Date.now()))}catch(e){}
+    SYNCMSG="";if(manual)toast("Synchronisiert");
+    if(changed||mine!==before||JSON.stringify(prof())!==oldP||VIEW==="mehr")render();
+  }catch(e){SYNCMSG="Sync-Fehler: "+e.message;if(manual)toast(SYNCMSG);if(VIEW==="mehr")render()}finally{SYNCING=false;if(SYNCMSG==="Synchronisiere …")SYNCMSG=""}}
+
+let ACC_UI={};
+function acctSec(){
+  const p=prof()||{},ok=p.approved||p.is_admin;let last=0;try{last=+localStorage.getItem(CSKEY)||0}catch(e){}
+  const when=last?new Date(last).toLocaleString("de-DE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"noch nie";
+  const s=sec("Konto",ok?h("span",{class:"pill good"},p.is_admin?"Admin":"freigeschaltet"):h("span",{class:"pill warn"},"wartet auf Freischaltung"));
+  s.append(h("p",{class:"small"},(p.name?p.name+" · ":"")+ACCT.email),
+    h("p",{class:"small"},"Cloud-Sync: zuletzt "+when+(SYNCMSG?" · ":""),SYNCMSG?h("span",{class:SYNCMSG.startsWith("Sync-Fehler")||SYNCMSG.startsWith("Wartet")?"warn-t":"muted"},SYNCMSG):null),
+    h("div",{class:"btn-row"},h("button",{class:"btn",onclick:()=>cloudSync(true)},"Jetzt synchronisieren"),h("button",{class:"btn",onclick:()=>{ACC_UI.pw=!ACC_UI.pw;render()}},"Passwort ändern"),h("button",{class:"btn",onclick:()=>Cloud.logout(false)},"Abmelden")));
+  if(ACC_UI.pw){const i=h("input",{type:"password",autocomplete:"new-password",placeholder:"mindestens 6 Zeichen"});
+    s.append(h("label",{style:"margin-top:10px"},"Neues Passwort",i),h("button",{class:"btn primary wide",onclick:async()=>{if(i.value.length<6){toast("Mindestens 6 Zeichen");return}try{await Cloud.setPassword(i.value);ACC_UI.pw=false;toast("Passwort geändert");render()}catch(e){toast(e.message)}}},"Speichern"))}
+  s.append(h("p",{class:"muted tiny"},"Deine Daten werden automatisch mit deinem Konto synchronisiert, auf jedem Gerät, auf dem du dich anmeldest. Niemand sonst kann sie lesen, auch der Admin nicht. Formcheck-Fotos und ein KI-Schlüssel bleiben nur auf diesem Gerät."),
+    h("button",{class:"link danger",onclick:()=>{ACC_UI.del=!ACC_UI.del;render()}},"Konto löschen …"));
+  if(ACC_UI.del)s.append(h("div",{class:"small"},"Konto und alle Daten in der Cloud endgültig löschen? ",h("button",{class:"btn danger",onclick:async()=>{try{await Cloud.deleteMe()}catch(e){toast(e.message)}}},"Ja, endgültig löschen")));
+  return s}
+
+/* ---------- Admin: Konten freischalten, Funktionen und Vorgaben ---------- */
+let ADM={list:null,loading:false,err:"",open:null};
+async function admLoad(){ADM.loading=true;try{ADM.list=await Cloud.users();ADM.err=""}catch(e){ADM.err=e.message}finally{ADM.loading=false;if(VIEW==="mehr")render()}}
+async function admSet(u,patch,msg){try{await Cloud.setUser(u.id,patch);Object.assign(u,patch);toast(msg||"Gespeichert")}catch(e){toast(e.message)}render()}
+function adminSec(){
+  const s=sec("Freunde verwalten",h("button",{class:"link",onclick:admLoad},"Neu laden"));
+  if(!ADM.list&&!ADM.loading&&!ADM.err)admLoad();
+  if(ADM.err)return s.append(h("p",{class:"small warn-t"},ADM.err)),s;
+  if(!ADM.list){s.append(h("p",{class:"muted small"},"Lade Konten …"));return s}
+  const others=ADM.list.filter(u=>u.id!==ACCT.uid);
+  if(!others.length)s.append(h("p",{class:"muted small"},"Noch keine Freunde registriert. Schick ihnen den Link zur App, sie registrieren sich selbst. Danach tauchen sie hier auf und du schaltest sie frei."));
+  for(const u of others){const open=ADM.open===u.id,a=u.assigned||{},ft=u.features||{};
+    const row=h("div",{class:"fc-row"},h("button",{class:"fc-head",onclick:()=>{ADM.open=open?null:u.id;render()}},
+      h("div",{class:"fc-meta"},h("div",{style:"font-weight:600"},u.name||u.email),h("div",{class:"tiny muted"},u.email+" · seit "+new Date(u.created_at).toLocaleDateString("de-DE")),
+        h("span",{class:"pill "+(u.approved?"good":"warn")},u.approved?"freigeschaltet":"wartet")," ",ft.formcheck?h("span",{class:"pill good"},"Formcheck"):null)));
+    if(open){
+      row.append(h("div",{class:"btn-row"},h("button",{class:"btn"+(u.approved?"":" primary"),onclick:()=>admSet(u,{approved:!u.approved},u.approved?"Gesperrt":"Freigeschaltet")},u.approved?"Sperren":"Freischalten")),
+        h("label",{class:"inline",style:"margin-top:10px"},h("input",{type:"checkbox",checked:ft.formcheck?true:null,onchange:e=>admSet(u,{features:{...ft,formcheck:e.target.checked}},e.target.checked?"Formcheck freigeschaltet":"Formcheck gesperrt")}),"Formcheck (Fotos + KI)"),
+        h("p",{class:"muted tiny"},"Mit Formcheck braucht die Person für die KI einen eigenen API-Schlüssel. Deiner bleibt auf deinem Gerät."));
+      const pl=h("select",{},h("option",{value:""},"nicht ändern"),h("option",{value:"none",selected:a.plan==="none"?true:null},"Ohne festen Plan"),h("option",{value:"ultra100",selected:a.plan==="ultra100"?true:null},"Ultra-100-Plan (41 Wochen)"));
+      const num=(ph,v)=>h("input",{type:"number",inputmode:"decimal",placeholder:ph,value:v??""});
+      const iw=num("kg",a.weight),ik=num("kcal",a.kcal),ip=num("g",a.prot);
+      row.append(h("div",{class:"tiny muted up",style:"margin-top:14px"},"Vorgaben"),h("label",{},"Trainingsplan",pl),
+        h("div",{class:"grid3",style:"margin-top:8px"},h("label",{},"Gewicht",iw),h("label",{},"Kalorien",ik),h("label",{},"Protein",ip)),
+        h("button",{class:"btn primary wide",onclick:()=>{const v=x=>x.value===""?null:+x.value.replace(",",".");
+          const na={plan:pl.value||null,weight:v(iw),kcal:v(ik),prot:v(ip),u:Date.now()};admSet(u,{assigned:na},"Vorgaben gesendet, sie kommen beim nächsten Öffnen an")}},"Vorgaben senden"),
+        h("p",{class:"muted tiny"},"Leere Felder bleiben, wie die Person sie eingestellt hat. Einen eigenen Trainingsplan aus einem PDF baue ich auf Wunsch als weitere Plan-Option ein."));
+    }
+    s.append(row)}
+  s.append(h("p",{class:"muted tiny",style:"margin-top:10px"},"Du siehst hier nur Namen, E-Mail und Freigaben. Die Ernährungs- und Trainingsdaten deiner Freunde kann die Datenbank dir nicht zeigen."));
+  return s}
+
+/* ---------- Einrichtung beim ersten Start eines neuen Kontos ---------- */
+let OB=null;
+function obCalc(o){if(!(o.w>30&&o.hgt>120&&o.age>10))return null;
+  const bmr=10*o.w+6.25*o.hgt-5*o.age+(o.sex==="m"?5:o.sex==="w"?-161:-78);
+  const kcal=Math.round(bmr*({low:1.4,mid:1.6,high:1.8}[o.act])+({muscle:300,keep:0,lose:-400,endur:150}[o.goal]));
+  return{kcal:Math.round(kcal/50)*50,prot:Math.round(o.w*({muscle:2,keep:1.6,lose:2,endur:1.7}[o.goal])/5)*5}}
+function renderOnboarding(){
+  const root=$("#v-training");root.replaceChildren();$("nav.tabs").hidden=true;
+  $("#dTitle").textContent="Willkommen";$("#dSub").textContent="Einmal einrichten, dann geht's los";
+  OB??={name:(prof()||{}).name||"",sex:"m",age:null,hgt:null,w:null,act:"mid",goal:"muscle",plan:"none",supps:{},kcal:null,prot:null};
+  const num=(label,k,ph,step="1")=>{const i=h("input",{type:"number",inputmode:"decimal",step,placeholder:ph,value:OB[k]??""});i.oninput=()=>{OB[k]=i.value===""?null:+i.value.replace(",",".");if(k!=="kcal"&&k!=="prot"){OB.kcal=OB.prot=null;upd()}};return h("label",{},label,i)};
+  const chips=(k,opts)=>h("div",{class:"chips"},opts.map(([v,l])=>h("button",{class:"chip","aria-pressed":OB[k]===v?"true":"false",onclick:()=>{OB[k]=v;if(k!=="plan")OB.kcal=OB.prot=null;renderOnboarding()}},l)));
+  const tgt=h("div",{});
+  function upd(){const c=obCalc(OB);tgt.replaceChildren();if(!c){tgt.append(h("p",{class:"muted small"},"Trag Alter, Größe und Gewicht ein, dann rechne ich deinen Bedarf aus."));return}
+    const ik=h("input",{type:"number",inputmode:"numeric",value:OB.kcal??c.kcal}),ip=h("input",{type:"number",inputmode:"numeric",value:OB.prot??c.prot});
+    ik.onchange=()=>{OB.kcal=+ik.value||null};ip.onchange=()=>{OB.prot=+ip.value||null};
+    tgt.append(h("div",{class:"grid2"},h("label",{},"Kalorien pro Tag (Ruhetag)",ik),h("label",{},"Protein pro Tag (g)",ip)),
+      h("p",{class:"muted tiny"},"Geschätzt nach Mifflin-St Jeor. An Trainingstagen rechnet die App automatisch mehr Kohlenhydrate dazu. Du kannst die Werte jederzeit in den Einstellungen ändern."))}
+  upd();
+  const iN=h("input",{type:"text",value:OB.name,maxlength:"40",autocomplete:"given-name"});iN.oninput=()=>{OB.name=iN.value};
+  const sl=h("div",{});
+  for(const s of SUPP_DEFAULT){const on=!!OB.supps[s.id];sl.append(h("label",{class:"inline"},h("input",{type:"checkbox",checked:on?true:null,onchange:e=>{OB.supps[s.id]=e.target.checked}}),s.name+" ("+fmt(s.dose)+" "+s.unit+")"))}
+  root.append(
+    sec("Über dich",null,h("label",{},"Vorname",iN),h("div",{class:"tiny muted up",style:"margin-top:12px"},"Geschlecht"),chips("sex",[["m","männlich"],["w","weiblich"],["d","divers"]]),
+      h("div",{class:"grid3",style:"margin-top:12px"},num("Alter","age","Jahre"),num("Größe (cm)","hgt","180"),num("Gewicht (kg)","w","75","0.1"))),
+    sec("Dein Ziel",null,chips("goal",[["muscle","Muskelaufbau"],["keep","Gewicht halten"],["lose","Abnehmen"],["endur","Ausdauer / Wettkampf"]]),
+      h("div",{class:"tiny muted up",style:"margin-top:12px"},"Wie aktiv bist du?"),chips("act",[["low","wenig Sport"],["mid","3–4× pro Woche"],["high","fast täglich"]]),
+      h("div",{style:"margin-top:12px"},tgt)),
+    sec("Trainingsplan",null,chips("plan",[["none","Ohne festen Plan"],["ultra100","Ultra-100-Plan (41 Wochen bis 4.9.2027)"]]),
+      h("p",{class:"muted tiny"},"Ohne Plan trägst du einfach ein, was du machst, und bekommst Vorschläge aus deinem Verlauf. Einen eigenen Plan kann dir der Admin später zuweisen.")),
+    sec("Supplements",h("span",{class:"muted tiny"},"optional"),sl,h("p",{class:"muted tiny"},"Dosis änderst du später in den Einstellungen. Eigene Supplements trägst du einfach beim Essen ein.")),
+    h("button",{class:"btn primary wide",onclick:async()=>{const c=obCalc(OB);if(!c){toast("Bitte Alter, Größe und Gewicht eintragen");return}
+      const st=S.settings;Object.assign(st,{weight:OB.w,age:OB.age,height:OB.hgt,sex:OB.sex,goal:OB.goal,act:OB.act,plan:OB.plan,kcal:OB.kcal||c.kcal,prot:OB.prot||c.prot,onboarded:true});
+      for(const s of st.supps)s.active=!!OB.supps[s.id];
+      if(OB.name.trim()&&window.Cloud)Cloud.setName(OB.name.trim()).then(()=>Cloud.profile()).catch(()=>{});
+      OB=null;$("nav.tabs").hidden=false;save();toast("Fertig eingerichtet");setView("training")}},"Los geht's"));
+}
+
 /* ---------- Mehr / Einstellungen ---------- */
 function renderMehr(){
   const root=$("#v-mehr");root.replaceChildren();
   const n=(label,val,on,step="any")=>{const i=h("input",{type:"number",inputmode:"decimal",step,value:val??""});i.onchange=()=>on(i.value===""?null:+i.value.replace(",","."));return h("label",{},label,i)};
   root.append(sec("Profil",null,h("div",{class:"grid2"},n("Gewicht (kg)",S.settings.weight,v=>{if(v>30){S.settings.weight=v;save()}}),
-    n("5-km-Pace (Sek./km)",S.settings.p5?Math.round(S.settings.p5):null,v=>{S.settings.p5=v;S.settings.p5date=v?todayISO():null;save();render()},"1")),
+    n("5-km-Pace (Sek./km)",S.settings.p5?Math.round(S.settings.p5):null,v=>{S.settings.p5=v;S.settings.p5date=v?todayISO():null;save();render()},"1"),
+    n("Kalorien Ruhetag (kcal)",S.settings.kcal||3200,v=>{if(v>=1200&&v<=6000){S.settings.kcal=v;save()}},"50"),
+    n("Protein pro Tag (g)",S.settings.prot||200,v=>{if(v>=30&&v<=400){S.settings.prot=v;save()}},"5")),
+    h("label",{style:"margin-top:8px"},"Trainingsplan",h("select",{onchange:e=>{S.settings.plan=e.target.value;save();render()}},
+      h("option",{value:"ultra100",selected:!NOPLAN()?true:null},"Ultra-100-Plan (41 Wochen bis 4.9.2027)"),h("option",{value:"none",selected:NOPLAN()?true:null},"Ohne festen Plan"))),
     h("p",{class:"muted tiny"},S.settings.p5?"Zonen basieren auf "+pace(S.settings.p5)+" /km (5 km).":"Noch kein 5-km-Test: Zonen aus dem Plan.")));
   const sl=h("div",{});
   S.settings.supps.forEach(s=>{const i=h("input",{type:"number",inputmode:"decimal",value:s.dose,"aria-label":"Dosis"});i.onchange=()=>{s.dose=+i.value.replace(",",".")||0;if(s.min&&s.dose<s.min){s.dose=s.min;i.value=s.min;toast(s.name+": mindestens "+fmt(s.min)+" "+s.unit)}save()};
     sl.append(h("div",{class:"supp-r"},h("label",{class:"inline"},h("input",{type:"checkbox",checked:s.active?true:null,onchange:e=>{s.active=e.target.checked;save()}}),s.name),i,h("span",{class:"muted tiny"},s.unit)))});
-  root.append(sec("Meine Supplements",null,sl,h("p",{class:"muted tiny"},"Bei Magnesium und Zink zählt die Menge des reinen Minerals (steht auf der Packung als „davon Magnesium“). Die Dosis fließt in die Nährstoffe ein. Vitamin D3: mindestens 10.000 IE, dazu 200 µg K2 (MK-7), also etwa 20 µg K2 je 1.000 IE. 10.000 IE liegen über der EU-Obergrenze von 4.000 IE und gelten als obere Grenze für die Dauer. Lass deshalb alle 3 bis 6 Monate 25-OH-Vitamin-D (Ziel 40–60 ng/ml) und Calcium im Blut messen.")));
-  root.append(syncSec());
-  root.append(aiSec());
-  root.append(sec("Daten",null,h("p",{class:"muted small"},SY.token?"Zusätzlich zum Sync kannst du ein Backup als Datei sichern.":"Ohne Sync liegt alles nur auf diesem Gerät. Mach ab und zu ein Backup."),
+  root.append(sec("Meine Supplements",null,sl,h("p",{class:"muted tiny"},"Bei Magnesium und Zink zählt die Menge des reinen Minerals (steht auf der Packung als „davon Magnesium“). Die Dosis fließt in die Nährstoffe ein. "+(S.settings.supps.some(s=>s.id==="d3"&&s.min)?"Vitamin D3: mindestens 10.000 IE, dazu 200 µg K2 (MK-7), also etwa 20 µg K2 je 1.000 IE. 10.000 IE liegen über der EU-Obergrenze von 4.000 IE und gelten als obere Grenze für die Dauer. Lass deshalb alle 3 bis 6 Monate 25-OH-Vitamin-D (Ziel 40–60 ng/ml) und Calcium im Blut messen.":"Vitamin D3: Die EU-Obergrenze liegt bei 4.000 IE am Tag. Wer dauerhaft mehr nimmt, sollte den Wert im Blut messen lassen."))));
+  if(window.ACCT){root.append(acctSec());if(isAdmin())root.append(adminSec())}else root.append(syncSec());
+  root.append(featureOn("formcheck")?aiSec():sec("KI-Auswertung (Formcheck)",h("span",{class:"pill warn"},"nicht freigeschaltet")));
+  root.append(sec("Daten",null,h("p",{class:"muted small"},SY.token||window.ACCT?"Zusätzlich zum Sync kannst du ein Backup als Datei sichern.":"Ohne Sync liegt alles nur auf diesem Gerät. Mach ab und zu ein Backup."),
     h("div",{class:"btn-row"},h("button",{class:"btn",onclick:exportData},"Backup exportieren"),h("button",{class:"btn",onclick:()=>$("#impF").click()},"Backup laden")),
     h("button",{class:"link danger",onclick:()=>{const b=$("#delC");b.hidden=!b.hidden}},"Alle Daten löschen …"),
-    h("div",{id:"delC",hidden:true,class:"small"},"Wirklich alles löschen? ",h("button",{class:"btn danger",onclick:()=>{S=freshState();save();toast("Gelöscht");setView("training")}},"Ja, löschen"))));
+    h("div",{id:"delC",hidden:true,class:"small"},"Wirklich alles löschen? ",h("button",{class:"btn danger",onclick:()=>{S=freshState();if(window.ACCT)S.settings.onboarded=true;save();if(window.ACCT)Cloud.store(S).catch(()=>{});toast("Gelöscht");setView("training")}},"Ja, löschen"))));
   root.append(sec("So nutzt du die App",null,h("ul",{class:"list small"},
     h("li",{},"Auf den Homescreen: in Safari auf Teilen tippen, dann „Zum Home-Bildschirm“."),
     h("li",{},"Sprechen: im Textfeld auf das Mikrofon der iPhone-Tastatur tippen. Falls es fehlt: Einstellungen › Allgemein › Tastatur › Diktierfunktion an."),
@@ -1571,7 +1697,7 @@ $("#next").onclick=()=>{CUR=addDays(CUR,1);PREVIEW=null;render()};
 $("#dTitle").onclick=()=>{CUR=todayISO();render()};
 $("#settingsBtn").onclick=()=>setView("mehr");
 $("#pkClose").onclick=()=>$("#picker").close();
-$("#impF").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const j=JSON.parse(await f.text());if(!j.days)throw 0;S=j;save();toast("Backup geladen");render()}catch(x){toast("Datei ist kein gültiges Backup")}e.target.value=""};
+$("#impF").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const j=JSON.parse(await f.text());if(!j.days)throw 0;j.settings??={};j.settings.onboarded=true;S=j;save();toast("Backup geladen");render()}catch(x){toast("Datei ist kein gültiges Backup")}e.target.value=""};
 document.addEventListener("visibilitychange",()=>{if(document.hidden)return;if(CUR!==todayISO()&&CUR===addDays(todayISO(),-1)){CUR=todayISO();render()}syncNow(false)});
 rehash();
 render();

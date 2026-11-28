@@ -165,6 +165,7 @@ function fcCompare(list){
 
 /* ---------- Abschnitt im Fortschritt-Tab ---------- */
 function formSec(){
+  if(!featureOn("formcheck"))return sec("Formcheck",h("span",{class:"pill warn"},"nicht freigeschaltet"),h("p",{class:"muted small"},"Diese Funktion ist für dein Konto nicht freigeschaltet."));
   FC.urls.forEach(u=>URL.revokeObjectURL(u));FC.urls=[];
   if(!window.indexedDB)return sec("Formcheck",null,h("p",{class:"muted small"},"Dieser Browser kann keine Fotos speichern."));
   if(!FC.list){if(!FC.loading)FC.loading=fcLoad().catch(()=>{FC.list=[]}).finally(()=>{FC.loading=null;if(VIEW==="fortschritt")render()});

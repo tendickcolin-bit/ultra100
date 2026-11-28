@@ -6,7 +6,8 @@ Persönliche Web-App (PWA) für Ernährung und Training auf dem Weg zum 100-km-L
 - 34 Nährwerte (alle Vitamine, Mineralstoffe, Omega-3) gegen DGE/EFSA-Ziele und Obergrenzen
 - Tägliche Trainingsvorschläge: 41-Wochen-Plan als Orientierung, angepasst an das, was wirklich trainiert wurde
 - Über 7.000 Lebensmittel aus dem Bundeslebensmittelschlüssel 4.0 (offline), Markenprodukte und Barcode-Scan über Open Food Facts, eigene Lebensmittel anlegen
-- Daten bleiben nur im Browser des Geräts (localStorage), Backup per Export
+- Ohne Konten: Daten bleiben nur im Browser des Geräts (localStorage), Backup per Export
+- Mit Konten (Supabase, kostenlos, `config.js` ausgefüllt): Anmeldung, eigene Daten pro Konto in der Cloud (Row Level Security), Admin schaltet Freunde und Funktionen frei. Einrichtung: `supabase/ANLEITUNG.md`
 
 Statische Dateien, keine Build-Schritte. Läuft auf GitHub Pages.
 
