@@ -165,6 +165,21 @@ dialog::backdrop{background:rgba(0,0,0,.25)}
 @media (prefers-reduced-motion:no-preference){.icon-btn.on{animation:p 1.2s infinite}@keyframes p{50%{opacity:.6}}}
 .btn-row.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .btn-row.two .btn{width:100%}
+.fc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.fc-tile{position:relative;width:100%;aspect-ratio:3/4;border:1px dashed #c9ccd3;border-radius:12px;background:#fff;padding:0;overflow:hidden;display:grid;place-items:center}
+.fc-tile img{width:100%;height:100%;object-fit:cover;display:block}.fc-tile.busy{opacity:.5}
+.fc-plus{font-size:30px;color:var(--muted);line-height:1}
+.fc-tl{position:absolute;left:0;right:0;bottom:0;background:rgba(255,255,255,.88);font-size:12.5px;font-weight:600;padding:4px 0}
+.fc-cmp{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}
+.fc-cmp figure,.fc-full figure{margin:0}
+.fc-img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:10px;background:var(--soft);display:block}
+.fc-none{display:grid;place-items:center;color:var(--muted);font-size:13px}
+.fc-row{border-top:1px solid var(--line);padding:10px 0}
+.fc-head{display:flex;gap:12px;align-items:center;width:100%;background:none;border:0;padding:0;text-align:left}
+.fc-thumbs{display:flex;gap:4px;flex:0 0 auto}.fc-th{width:40px;height:53px;object-fit:cover;border-radius:6px;background:var(--soft);display:block}
+.fc-meta{display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:0}
+.fc-full{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px}
+.fc-ai{background:var(--soft);border-radius:12px;padding:10px 12px;margin-top:10px}.fc-ai p{margin:4px 0}.fc-ai .fc-li{padding-left:4px}
 </style>
 </head>
 <body>
@@ -198,6 +213,7 @@ dialog::backdrop{background:rgba(0,0,0,.25)}
 </div></dialog>
 <input type="file" id="impF" accept="application/json,.json" hidden>
 <script src="data.js"></script>
+<script src="formcheck.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

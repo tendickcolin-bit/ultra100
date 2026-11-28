@@ -1346,6 +1346,7 @@ function renderFortschritt(){
   else{const avg=a=>a.reduce((x,y)=>x+y.v,0)/a.length,l7=pts.filter(p=>p.ds>addDays(CUR,-7)),p7=pts.filter(p=>p.ds<=addDays(CUR,-7)&&p.ds>addDays(CUR,-14));
     wsec.append(progRow("Wochenschnitt",l7.length?fmt(avg(l7),1)+" kg":"–",l7.length&&p7.length?delta(avg(l7),avg(p7),"kg",2):null,"zuletzt "+fmt(pts.at(-1).v,1)+" kg am "+short(pts.at(-1).ds)))}
   root.append(wsec);
+  root.append(formSec());
   // 7-Tage-Schnitt Nährstoffe
   const last7=days.slice(-7).filter(ds=>hasDay(ds)&&day(ds).entries.length);
   if(last7.length>=2){const avgT={};NK.forEach(k=>avgT[k]=last7.reduce((a,ds)=>a+totals(ds)[k],0)/last7.length);
@@ -1549,6 +1550,7 @@ function renderMehr(){
     sl.append(h("div",{class:"supp-r"},h("label",{class:"inline"},h("input",{type:"checkbox",checked:s.active?true:null,onchange:e=>{s.active=e.target.checked;save()}}),s.name),i,h("span",{class:"muted tiny"},s.unit)))});
   root.append(sec("Meine Supplements",null,sl,h("p",{class:"muted tiny"},"Bei Magnesium und Zink zählt die Menge des reinen Minerals (steht auf der Packung als „davon Magnesium“). Die Dosis fließt in die Nährstoffe ein. Vitamin D3: mindestens 10.000 IE, dazu 200 µg K2 (MK-7), also etwa 20 µg K2 je 1.000 IE. 10.000 IE liegen über der EU-Obergrenze von 4.000 IE und gelten als obere Grenze für die Dauer. Lass deshalb alle 3 bis 6 Monate 25-OH-Vitamin-D (Ziel 40–60 ng/ml) und Calcium im Blut messen.")));
   root.append(syncSec());
+  root.append(aiSec());
   root.append(sec("Daten",null,h("p",{class:"muted small"},SY.token?"Zusätzlich zum Sync kannst du ein Backup als Datei sichern.":"Ohne Sync liegt alles nur auf diesem Gerät. Mach ab und zu ein Backup."),
     h("div",{class:"btn-row"},h("button",{class:"btn",onclick:exportData},"Backup exportieren"),h("button",{class:"btn",onclick:()=>$("#impF").click()},"Backup laden")),
     h("button",{class:"link danger",onclick:()=>{const b=$("#delC");b.hidden=!b.hidden}},"Alle Daten löschen …"),
