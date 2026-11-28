@@ -1588,7 +1588,8 @@ async function cloudSync(manual){
   try{
     const p=await Cloud.profile();
     const changed=applyAssigned(p);
-    if(!p||!(p.approved||p.is_admin)){SYNCMSG="Wartet auf Freischaltung. Bis dahin bleiben deine Daten nur auf diesem Gerät.";if(manual)toast(SYNCMSG);if(changed||JSON.stringify(prof())!==oldP||VIEW==="mehr")render();return}
+    if(p&&!(p.approved||p.is_admin)){location.reload();return}
+    if(!p){SYNCMSG="Konto nicht gefunden.";if(manual)toast(SYNCMSG);if(changed||JSON.stringify(prof())!==oldP||VIEW==="mehr")render();return}
     const row=await Cloud.load();const R=row&&row.data;
     const before=JSON.stringify(S);
     if(R&&R.days){S=mergeState(S,R);S.days??={};S.custom??=[];S.learn??={};rehash();personalize();localStorage.setItem(KEY,JSON.stringify(S))}
