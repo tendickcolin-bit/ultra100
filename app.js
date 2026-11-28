@@ -611,8 +611,7 @@ function nutriSummary(){
   const macro=(l,v,t,u)=>h("div",{class:"mrow"},h("span",{},l),bar(v,t),h("span",{class:"num muted"},fmt(v)+" / "+fmt(t)+" "+u));
   return sec("Heute",h("span",{class:"muted small"},tg.label),
     h("div",{class:"kcal"},h("div",{},h("div",{class:"big num"},fmt(Math.abs(left))),h("div",{class:"muted small"},left>=0?"kcal übrig":"kcal über dem Ziel")),h("div",{class:"num muted small",style:"text-align:right"},fmt(T.kcal)+" gegessen",h("br"),fmt(tg.kcal)+" Ziel")),
-    macro("Protein",T.p,tg.p,"g"),macro("Kohlenhydrate",T.c,tg.c,"g"),macro("Fett",T.f,tg.f,"g"),
-    suggestBox(CUR,effT(CUR,T),tg));
+    macro("Protein",T.p,tg.p,"g"),macro("Kohlenhydrate",T.c,tg.c,"g"),macro("Fett",T.f,tg.f,"g"));
 }
 function warnSec(){
   const T=effT(CUR);const warn=[];for(const n of NUTR)if(n[4]&&T[n[0]]>n[4])warn.push(n[1]+": "+fmt(T[n[0]],n[6])+" "+n[2]+(T._win[n[0]]>1?" im Schnitt der letzten "+T._win[n[0]]+" Tage":"")+" liegt über der sicheren Obergrenze von "+fmt(n[4])+" "+n[2]+".");
@@ -944,7 +943,7 @@ function renderErnaehrung(){
   root.append(quickInput("food"));if(PREVIEW&&PREVIEW.where==="ernaehrung")root.append(previewBox());
   const toPrev=f=>{PREVIEW={text:"",meal:guessMeal(),items:[{fid:f.id,g:f.p||f.u}],workouts:[],check:{},supps:{},unknown:[],where:"ernaehrung"};render()};
   root.append(h("div",{class:"btn-row two"},h("button",{class:"btn",onclick:()=>openPicker(toPrev)},"Suchen"),h("button",{class:"btn",onclick:()=>{openPicker(toPrev);$("#pkScan").click()}},"Barcode scannen")));
-  root.append(nutriSummary());root.append(suppSec());const w=warnSec();if(w)root.append(w);
+  root.append(nutriSummary());root.append(suppSec());
   const d=hasDay(CUR)?day(CUR):{entries:[]};
   const byMeal={};for(const e of d.entries)(byMeal[e.meal||"snack"]??=[]).push(e);
   const list=h("div",{});
@@ -1089,7 +1088,6 @@ function renderTraining(){
     h("p",{class:"muted tiny"},"RPE geht vor Pace. Nach einem 5-km-Test („5 km Test in 24:30“) rechne ich die Zonen neu.")));
   const open=OPEN.has("plan");
   root.append(sec("Dein Plan (Leitlinie)",h("button",{class:"link",onclick:()=>{open?OPEN.delete("plan"):OPEN.add("plan");render()}},open?"Zuklappen":"Anzeigen"),open?planTable():h("p",{class:"muted tiny"},"41 Wochen bis zum 100er. Der Plan gibt Struktur und Ziel vor. Wie viel an welchem Tag dran ist, rechne ich aus dem, was du wirklich trainiert hast.")));
-  root.append(gapSec());
 }
 function logForm(){
   const F=LOGFORM||(LOGFORM={type:"run"});
